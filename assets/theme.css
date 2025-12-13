@@ -1,7 +1,0 @@
-:root { color-scheme: dark; }
-html, body { background:#111; color:#eee; }
-.Select-control, .Select-menu-outer, .Select-option { background:#1b1b1b !important; color:#eee !important; }
-.Select-option.is-focused { background:#2a2a2a !important; }
-.rc-slider-rail { background:#2a2a2a; }
-.rc-slider-track { background:#5bb7ff; }
-.cy-container, #network-graph { background:#111 !important; }
