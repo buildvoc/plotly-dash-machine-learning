@@ -17,9 +17,6 @@ app = Dash(
     assets_folder=os.path.join(APP_DIR, "assets"),
 )
 
-# -------------------------------------------------------------------
-# Data
-# -------------------------------------------------------------------
 files = list_docling_files()
 
 LAYOUTS = [
@@ -30,16 +27,13 @@ LAYOUTS = [
     ("COSE", "cose"),
 ]
 
-# -------------------------------------------------------------------
-# Layout
-# -------------------------------------------------------------------
 app.layout = html.Div(
     style={"padding": "10px"},
     children=[
         html.H3("Docling Graph Viewer"),
 
         html.Div(
-            style={"display": "flex", "gap": "8px", "flexWrap": "wrap"},
+            style={"display": "flex", "gap": "14px", "flexWrap": "wrap", "alignItems": "center"},
             children=[
                 dcc.Dropdown(
                     id="file",
@@ -48,24 +42,35 @@ app.layout = html.Div(
                     clearable=False,
                     style={"minWidth": "520px"},
                 ),
-                dcc.Dropdown(
-                    id="page",
-                    placeholder="Page (optional)",
-                    clearable=True,
-                    style={"width": "140px"},
+
+                # PAGE RANGE SLIDER
+                html.Div(
+                    style={"minWidth": "520px"},
+                    children=[
+                        html.Div("Page range", style={"fontSize": "12px", "opacity": 0.8}),
+                        dcc.RangeSlider(
+                            id="page_range",
+                            min=1,
+                            max=1,
+                            step=1,
+                            value=[1, 1],
+                            marks={},
+                            tooltip={"placement": "bottom", "always_visible": False},
+                            allowCross=False,
+                        ),
+                    ],
                 ),
+
                 dcc.Dropdown(
                     id="type",
                     placeholder="Type: ALL",
                     clearable=False,
-                    multi=False,
                     style={"width": "160px"},
                 ),
                 dcc.Dropdown(
                     id="layer",
                     placeholder="Layer: ALL",
                     clearable=False,
-                    multi=False,
                     style={"width": "180px"},
                 ),
                 dcc.Dropdown(
@@ -83,15 +88,15 @@ app.layout = html.Div(
             style={"width": "100%", "height": "85vh"},
             wheelSensitivity=0.01,
             minZoom=0.25,
-            maxZoom=1.6,
+            maxZoom=2.0,
             stylesheet=[
                 {
                     "selector": "node",
                     "style": {
                         "label": "data(label)",
-                        "font-size": "11px",
+                        "font-size": "10px",
                         "text-wrap": "wrap",
-                        "text-max-width": "240px",
+                        "text-max-width": "520px",
                         "color": "#e5e7eb",
                     },
                 },
@@ -103,11 +108,14 @@ app.layout = html.Div(
     ],
 )
 
-# -------------------------------------------------------------------
-# Populate filters from Docling schema
-# -------------------------------------------------------------------
+# ------------------------------------------------------------
+# Populate range slider + Type/Layer options
+# ------------------------------------------------------------
 @app.callback(
-    Output("page", "options"),
+    Output("page_range", "min"),
+    Output("page_range", "max"),
+    Output("page_range", "value"),
+    Output("page_range", "marks"),
     Output("type", "options"),
     Output("type", "value"),
     Output("layer", "options"),
@@ -116,59 +124,57 @@ app.layout = html.Div(
 )
 def populate_filters(path):
     if not path:
-        return [], [], "ALL", [], "ALL"
+        return 1, 1, [1, 1], {}, [{"label": "ALL", "value": "ALL"}], "ALL", [{"label": "ALL", "value": "ALL"}], "ALL"
 
     els = build_graph_from_docling_json(path)
 
-    pages = sorted(
-        {e["data"].get("page") for e in els if e.get("data", {}).get("page") is not None}
-    )
-    types = sorted(
-        {e["data"].get("type") for e in els if e.get("data", {}).get("type")}
-    )
-    layers = sorted(
-        {
-            e["data"].get("content_layer")
-            for e in els
-            if e.get("data", {}).get("content_layer")
-        }
-    )
+    pages = sorted({e["data"].get("page") for e in els if e.get("data", {}).get("page") is not None})
+    if not pages:
+        pages = [1]
 
-    return (
-        [{"label": f"Page {p}", "value": p} for p in pages],
-        [{"label": "ALL", "value": "ALL"}] + [{"label": t, "value": t} for t in types],
-        "ALL",
-        [{"label": "ALL", "value": "ALL"}] + [{"label": l, "value": l} for l in layers],
-        "ALL",
-    )
+    pmin, pmax = pages[0], pages[-1]
 
-# -------------------------------------------------------------------
-# Graph update with schema filters (non-destructive)
-# -------------------------------------------------------------------
+    # default range: first 4 pages if available, else whole
+    default_hi = min(pmax, pmin + 3)
+    default_value = [pmin, default_hi]
+
+    # marks: show endpoints + every 5
+    marks = {}
+    for p in pages:
+        if p == pmin or p == pmax or p % 5 == 0:
+            marks[p] = str(p)
+
+    types = sorted({e["data"].get("type") for e in els if e.get("data", {}).get("type")})
+    layers = sorted({e["data"].get("content_layer") for e in els if e.get("data", {}).get("content_layer")})
+
+    type_opts = [{"label": "ALL", "value": "ALL"}] + [{"label": t, "value": t} for t in types]
+    layer_opts = [{"label": "ALL", "value": "ALL"}] + [{"label": l, "value": l} for l in layers]
+
+    return pmin, pmax, default_value, marks, type_opts, "ALL", layer_opts, "ALL"
+
+
 @app.callback(
     Output("graph", "elements"),
     Input("file", "value"),
-    Input("page", "value"),
+    Input("page_range", "value"),
     Input("type", "value"),
     Input("layer", "value"),
-    Input("layout", "value"),
 )
-def update_graph(path, page, typ, layer, layout):
+def update_elements(path, page_range, typ, layer):
     if not path:
         return []
 
     els = build_graph_from_docling_json(path)
 
-    # Fast path: nothing filtered
-    if page is None and typ in (None, "ALL") and layer in (None, "ALL"):
-        return els
+    lo, hi = 1, 10**9
+    if isinstance(page_range, (list, tuple)) and len(page_range) == 2:
+        lo, hi = int(page_range[0]), int(page_range[1])
 
     keep = set()
 
     for e in els:
         d = e.get("data", {})
         nid = d.get("id")
-
         if not nid:
             continue
 
@@ -176,7 +182,11 @@ def update_graph(path, page, typ, layer, layout):
             keep.add(nid)
             continue
 
-        page_ok = page is None or d.get("page") == page
+        page = d.get("page")
+        page_ok = True
+        if page is not None:
+            page_ok = lo <= int(page) <= hi
+
         type_ok = typ in (None, "ALL") or d.get("type") == typ
         layer_ok = layer in (None, "ALL") or d.get("content_layer") == layer
 
@@ -193,9 +203,7 @@ def update_graph(path, page, typ, layer, layout):
 
     return out
 
-# -------------------------------------------------------------------
-# Layout control
-# -------------------------------------------------------------------
+
 @app.callback(
     Output("graph", "layout"),
     Input("layout", "value"),
