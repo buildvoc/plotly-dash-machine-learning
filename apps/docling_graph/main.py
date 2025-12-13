@@ -19,13 +19,26 @@ app = Dash(
 
 files = list_docling_files()
 
+# NOTE:
+# - "Force-directed" is COSE (built-in) and requires no extra files.
+# - "Force-Atlas2" requires cytoscape-layout-forceatlas2 plugin JS in assets/.
 LAYOUTS = [
-    ("Dagre", "dagre"),
+    ("Dagre (sequence)", "dagre"),
     ("Breadthfirst", "breadthfirst"),
+    ("Force-directed (COSE)", "cose"),          # ✅ Option 1
     ("COSE-Bilkent", "cose-bilkent"),
-    ("Cola", "cola"),
-    ("COSE", "cose"),
+    ("Cola (read text)", "cola"),
+    ("Force-Atlas2 (plugin)", "forceatlas2"),   # ✅ Option 2 (plugin)
 ]
+
+def _page_set(elements):
+    return sorted(
+        {
+            e["data"].get("page")
+            for e in elements
+            if e.get("data", {}).get("page") is not None
+        }
+    )
 
 app.layout = html.Div(
     style={"padding": "10px"},
@@ -43,7 +56,6 @@ app.layout = html.Div(
                     style={"minWidth": "520px"},
                 ),
 
-                # PAGE RANGE SLIDER
                 html.Div(
                     style={"minWidth": "520px"},
                     children=[
@@ -78,7 +90,7 @@ app.layout = html.Div(
                     options=[{"label": l, "value": v} for l, v in LAYOUTS],
                     value="dagre",
                     clearable=False,
-                    style={"width": "180px"},
+                    style={"width": "240px"},
                 ),
             ],
         ),
@@ -127,18 +139,12 @@ def populate_filters(path):
         return 1, 1, [1, 1], {}, [{"label": "ALL", "value": "ALL"}], "ALL", [{"label": "ALL", "value": "ALL"}], "ALL"
 
     els = build_graph_from_docling_json(path)
-
-    pages = sorted({e["data"].get("page") for e in els if e.get("data", {}).get("page") is not None})
-    if not pages:
-        pages = [1]
-
+    pages = _page_set(els) or [1]
     pmin, pmax = pages[0], pages[-1]
 
-    # default range: first 4 pages if available, else whole
     default_hi = min(pmax, pmin + 3)
     default_value = [pmin, default_hi]
 
-    # marks: show endpoints + every 5
     marks = {}
     for p in pages:
         if p == pmin or p == pmax or p % 5 == 0:
@@ -153,25 +159,30 @@ def populate_filters(path):
     return pmin, pmax, default_value, marks, type_opts, "ALL", layer_opts, "ALL"
 
 
+# ------------------------------------------------------------
+# Elements + label mode (short for Dagre, full otherwise)
+# ------------------------------------------------------------
 @app.callback(
     Output("graph", "elements"),
     Input("file", "value"),
     Input("page_range", "value"),
     Input("type", "value"),
     Input("layer", "value"),
+    Input("layout", "value"),
 )
-def update_elements(path, page_range, typ, layer):
+def update_elements(path, page_range, typ, layer, layout_name):
     if not path:
         return []
 
     els = build_graph_from_docling_json(path)
+
+    use_short = (layout_name == "dagre")
 
     lo, hi = 1, 10**9
     if isinstance(page_range, (list, tuple)) and len(page_range) == 2:
         lo, hi = int(page_range[0]), int(page_range[1])
 
     keep = set()
-
     for e in els:
         d = e.get("data", {})
         nid = d.get("id")
@@ -196,20 +207,85 @@ def update_elements(path, page_range, typ, layer):
     out = []
     for e in els:
         d = e.get("data", {})
+
         if "id" in d and d["id"] in keep:
-            out.append(e)
+            new_e = dict(e)
+            new_d = dict(d)
+            new_d["label"] = new_d.get("label_short") if use_short else new_d.get("label_full")
+            new_e["data"] = new_d
+            out.append(new_e)
+
         elif d.get("source") in keep and d.get("target") in keep:
             out.append(e)
 
     return out
 
 
+# ------------------------------------------------------------
+# Layout tuning: Dagre + Cola + Force-directed + ForceAtlas2
+# ------------------------------------------------------------
 @app.callback(
     Output("graph", "layout"),
     Input("layout", "value"),
 )
 def set_layout(name):
-    return {"name": name or "dagre", "fit": True}
+    name = name or "dagre"
+
+    if name == "dagre":
+        return {
+            "name": "dagre",
+            "rankDir": "TB",
+            "rankSep": 180,
+            "nodeSep": 80,
+            "edgeSep": 20,
+            "fit": True,
+            "padding": 30,
+        }
+
+    if name == "cola":
+        return {
+            "name": "cola",
+            "nodeSpacing": 60,
+            "edgeLength": 140,
+            "avoidOverlap": True,
+            "handleDisconnected": True,
+            "flow": {"axis": "y", "minSeparation": 50},
+            "fit": True,
+            "padding": 30,
+        }
+
+    # ✅ Option 1: force-directed (built-in)
+    if name == "cose":
+        return {
+            "name": "cose",
+            "animate": True,
+            "randomize": True,
+            "nodeRepulsion": 12000,
+            "idealEdgeLength": 160,
+            "gravity": 0.25,
+            "numIter": 1200,
+            "fit": True,
+            "padding": 30,
+        }
+
+    # ✅ Option 2: Force-Atlas2 (plugin)
+    # If plugin isn't loaded, Cytoscape will silently fail or fall back depending on browser console.
+    if name == "forceatlas2":
+        return {
+            "name": "forceatlas2",
+            "animate": True,
+            "randomize": True,
+            "iterationsPerRender": 20,
+            "maxIterations": 1200,
+            "scalingRatio": 8.0,
+            "gravity": 1.0,
+            "strongGravityMode": False,
+            "theta": 0.8,
+            "fit": True,
+            "padding": 30,
+        }
+
+    return {"name": name, "fit": True, "padding": 30}
 
 
 if __name__ == "__main__":
