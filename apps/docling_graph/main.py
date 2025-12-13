@@ -1,6 +1,5 @@
 import os
-import dash
-from dash import Dash, html, dcc, Input, Output, State
+from dash import Dash, html, dcc, Input, Output
 import dash_cytoscape as cyto
 
 from .graph_builder import build_graph_from_docling_json, list_docling_files
@@ -18,70 +17,69 @@ app = Dash(
     assets_folder=os.path.join(APP_DIR, "assets"),
 )
 
-LAYOUT_CHOICES = [
-    ("Dagre (directed)", "dagre"),
+# -------------------------------------------------------------------
+# Data
+# -------------------------------------------------------------------
+files = list_docling_files()
+
+LAYOUTS = [
+    ("Dagre", "dagre"),
     ("Breadthfirst", "breadthfirst"),
     ("COSE-Bilkent", "cose-bilkent"),
     ("Cola", "cola"),
     ("COSE", "cose"),
-    ("Grid", "grid"),
-    ("Circle", "circle"),
 ]
 
-def _layout_options():
-    return [{"label": l, "value": v} for l, v in LAYOUT_CHOICES]
-
-def _default_layout():
-    return "dagre"
-
-files = list_docling_files()
-
+# -------------------------------------------------------------------
+# Layout
+# -------------------------------------------------------------------
 app.layout = html.Div(
     style={"padding": "10px"},
     children=[
         html.H3("Docling Graph Viewer"),
 
-        dcc.Store(id="layout-store", data={}),
-        dcc.Store(id="zoom-store", data=1.0),
-
         html.Div(
             style={"display": "flex", "gap": "8px", "flexWrap": "wrap"},
             children=[
                 dcc.Dropdown(
-                    id="docling-file",
-                    options=[{"label": p, "value": p} for p in files],
+                    id="file",
+                    options=[{"label": f, "value": f} for f in files],
                     value=(files[0] if files else None),
                     clearable=False,
-                    style={"minWidth": "520px", "flex": "1"},
+                    style={"minWidth": "520px"},
                 ),
                 dcc.Dropdown(
-                    id="page-filter",
+                    id="page",
                     placeholder="Page (optional)",
                     clearable=True,
-                    style={"minWidth": "180px"},
+                    style={"width": "140px"},
                 ),
                 dcc.Dropdown(
-                    id="type-filter",
+                    id="type",
                     placeholder="Type: ALL",
                     clearable=False,
                     multi=False,
-                    style={"minWidth": "180px"},
+                    style={"width": "160px"},
                 ),
                 dcc.Dropdown(
-                    id="layout-name",
-                    options=_layout_options(),
-                    value=_default_layout(),
+                    id="layer",
+                    placeholder="Layer: ALL",
                     clearable=False,
-                    style={"minWidth": "240px"},
+                    multi=False,
+                    style={"width": "180px"},
                 ),
-                html.Button("Fit", id="fit-btn"),
+                dcc.Dropdown(
+                    id="layout",
+                    options=[{"label": l, "value": v} for l, v in LAYOUTS],
+                    value="dagre",
+                    clearable=False,
+                    style={"width": "180px"},
+                ),
             ],
         ),
 
         cyto.Cytoscape(
             id="graph",
-            elements=[],
-            layout={"name": _default_layout(), "fit": True},
             style={"width": "100%", "height": "85vh"},
             wheelSensitivity=0.01,
             minZoom=0.25,
@@ -93,70 +91,97 @@ app.layout = html.Div(
                         "label": "data(label)",
                         "font-size": "11px",
                         "text-wrap": "wrap",
-                        "text-max-width": "220px",
+                        "text-max-width": "240px",
                         "color": "#e5e7eb",
                     },
                 },
                 {"selector": ".document", "style": {"background-color": "#2563eb"}},
                 {"selector": ".section", "style": {"background-color": "#111827"}},
                 {"selector": ".item", "style": {"background-color": "#374151"}},
-                {"selector": "edge.seq", "style": {"line-style": "dotted", "opacity": 0.6}},
             ],
         ),
     ],
 )
 
-# -----------------------------
-# Populate page + type filters
-# -----------------------------
+# -------------------------------------------------------------------
+# Populate filters from Docling schema
+# -------------------------------------------------------------------
 @app.callback(
-    Output("page-filter", "options"),
-    Output("type-filter", "options"),
-    Output("type-filter", "value"),
-    Input("docling-file", "value"),
+    Output("page", "options"),
+    Output("type", "options"),
+    Output("type", "value"),
+    Output("layer", "options"),
+    Output("layer", "value"),
+    Input("file", "value"),
 )
 def populate_filters(path):
     if not path:
-        return [], [], "ALL"
+        return [], [], "ALL", [], "ALL"
 
     els = build_graph_from_docling_json(path)
-    pages = sorted({e["data"].get("page") for e in els if e.get("data", {}).get("page") is not None})
-    types = sorted({e["data"].get("type") for e in els if e.get("data", {}).get("type")})
+
+    pages = sorted(
+        {e["data"].get("page") for e in els if e.get("data", {}).get("page") is not None}
+    )
+    types = sorted(
+        {e["data"].get("type") for e in els if e.get("data", {}).get("type")}
+    )
+    layers = sorted(
+        {
+            e["data"].get("content_layer")
+            for e in els
+            if e.get("data", {}).get("content_layer")
+        }
+    )
 
     return (
         [{"label": f"Page {p}", "value": p} for p in pages],
         [{"label": "ALL", "value": "ALL"}] + [{"label": t, "value": t} for t in types],
         "ALL",
+        [{"label": "ALL", "value": "ALL"}] + [{"label": l, "value": l} for l in layers],
+        "ALL",
     )
 
-# -----------------------------
-# Load + filter graph
-# -----------------------------
+# -------------------------------------------------------------------
+# Graph update with schema filters (non-destructive)
+# -------------------------------------------------------------------
 @app.callback(
     Output("graph", "elements"),
-    Input("docling-file", "value"),
-    Input("page-filter", "value"),
-    Input("type-filter", "value"),
+    Input("file", "value"),
+    Input("page", "value"),
+    Input("type", "value"),
+    Input("layer", "value"),
+    Input("layout", "value"),
 )
-def load_graph(path, page_filter, type_filter):
+def update_graph(path, page, typ, layer, layout):
     if not path:
         return []
 
     els = build_graph_from_docling_json(path)
 
-    if page_filter is None and (type_filter in (None, "ALL")):
+    # Fast path: nothing filtered
+    if page is None and typ in (None, "ALL") and layer in (None, "ALL"):
         return els
 
     keep = set()
+
     for e in els:
         d = e.get("data", {})
+        nid = d.get("id")
+
+        if not nid:
+            continue
+
         if d.get("type") == "document":
-            keep.add(d.get("id"))
-        else:
-            page_ok = page_filter is None or d.get("page") == page_filter
-            type_ok = type_filter in (None, "ALL") or d.get("type") == type_filter
-            if page_ok and type_ok:
-                keep.add(d.get("id"))
+            keep.add(nid)
+            continue
+
+        page_ok = page is None or d.get("page") == page
+        type_ok = typ in (None, "ALL") or d.get("type") == typ
+        layer_ok = layer in (None, "ALL") or d.get("content_layer") == layer
+
+        if page_ok and type_ok and layer_ok:
+            keep.add(nid)
 
     out = []
     for e in els:
@@ -168,14 +193,15 @@ def load_graph(path, page_filter, type_filter):
 
     return out
 
-
+# -------------------------------------------------------------------
+# Layout control
+# -------------------------------------------------------------------
 @app.callback(
     Output("graph", "layout"),
-    Input("layout-name", "value"),
-    Input("fit-btn", "n_clicks"),
+    Input("layout", "value"),
 )
-def apply_layout(name, _):
-    return {"name": name or _default_layout(), "fit": True}
+def set_layout(name):
+    return {"name": name or "dagre", "fit": True}
 
 
 if __name__ == "__main__":
