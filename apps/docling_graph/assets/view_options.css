@@ -155,3 +155,134 @@
   border-top: 1px solid #1f2937;
   padding-top: 12px;
 }
+
+/* ---------------------------
+   Control panel (dark, inverted demo)
+----------------------------*/
+.control-tabs {
+  background: #0b0f17;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px #111827, 0 10px 30px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.control-tab {
+  background: #0b0f17;
+  color: #cbd5e1;
+  border: none;
+  padding: 0;
+}
+
+.control-tab--selected {
+  background: #0f172a !important;
+  border-bottom: 2px solid #7c3aed !important;
+  color: #e5e7eb !important;
+}
+
+.control-panel {
+  background: linear-gradient(135deg, #0f172a, #0b0f17);
+  border: 1px solid #111827;
+  border-radius: 12px;
+  padding: 14px 14px 18px;
+  color: #e5e7eb;
+  min-height: 80vh;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.45);
+}
+
+.control-panel--secondary {
+  min-height: unset;
+}
+
+.control-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.control-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.pill {
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  background: #111827;
+  border: 1px solid #1f2937;
+  color: #cbd5e1;
+}
+
+.pill--invert {
+  background: #c7d2fe;
+  color: #0b0f17;
+  border-color: #a5b4fc;
+}
+
+.control-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #111827;
+}
+
+.control-section--tight {
+  padding-top: 6px;
+}
+
+.control-label {
+  font-size: 12px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+
+.control-subtext {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #cbd5e1;
+  opacity: 0.85;
+}
+
+.Select-control,
+.Select-menu-outer {
+  background: #0f172a;
+  border-color: #1f2937;
+  color: #e5e7eb;
+}
+
+.control-panel .Select-value-label {
+  color: #e5e7eb !important;
+}
+
+.control-panel .rc-slider-track {
+  background-color: #7c3aed;
+}
+
+.control-panel .rc-slider-handle {
+  border-color: #7c3aed;
+  background-color: #0f172a;
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
+}
+
+.control-panel .rc-slider-rail {
+  background-color: #1f2937;
+}
+
+.control-panel .rc-slider-mark-text {
+  color: #94a3b8;
+}
+
+.control-radio,
+.control-checkbox {
+  accent-color: #7c3aed;
+  margin-right: 8px;
+}
+
+.control-radio__label,
+.control-checkbox__label {
+  color: #e5e7eb;
+}
