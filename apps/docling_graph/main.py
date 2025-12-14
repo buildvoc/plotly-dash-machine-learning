@@ -198,79 +198,132 @@ app.layout = html.Div(
                     className="four columns",
                     children=[
                         dcc.Tabs(
+                            className="control-tabs",
+                            colors={
+                                "border": "#111827",
+                                "primary": "#7c3aed",
+                                "background": "#0b0f17",
+                            },
                             children=[
                                 dcc.Tab(
+                                    className="control-tab",
+                                    selected_className="control-tab--selected",
                                     label="Control Panel",
                                     children=[
                                         html.Div(
-                                            style={"padding": "10px"},
+                                            className="control-panel",
                                             children=[
-                                                html.Label("Document"),
-                                                dcc.Dropdown(
-                                                    id="file",
-                                                    options=[{"label": f, "value": f} for f in files],
-                                                    value=(files[0] if files else None),
-                                                    clearable=False,
-                                                ),
-                                                html.Hr(),
-
-                                                html.Label("Page range"),
-                                                dcc.RangeSlider(
-                                                    id="page_range",
-                                                    min=1,
-                                                    max=1,
-                                                    step=1,
-                                                    value=[1, 1],
-                                                    marks={},
-                                                    allowCross=False,
-                                                ),
-                                                html.Hr(),
-
-                                                html.Label("Layout"),
-                                                dcc.Dropdown(
-                                                    id="layout",
-                                                    options=[{"label": l, "value": v} for l, v in LAYOUTS],
-                                                    value=DEFAULT_VIEW["layout"],
-                                                    clearable=False,
-                                                ),
-
-                                                html.Label("Scaling ratio"),
-                                                dcc.Slider(
-                                                    id="scaling_ratio",
-                                                    min=50,
-                                                    max=800,
-                                                    step=10,
-                                                    value=DEFAULT_VIEW["scaling_ratio"],
-                                                ),
-
-                                                html.Hr(),
-                                                html.Label("Expand"),
-                                                dcc.RadioItems(
-                                                    id="expand_mode",
-                                                    options=[
-                                                        {"label": "Children (hier)", "value": "children"},
-                                                        {"label": "All outgoing", "value": "out"},
-                                                        {"label": "All incoming", "value": "in"},
+                                                html.Div(
+                                                    className="control-panel__header",
+                                                    children=[
+                                                        html.Div("Graph controls", className="control-title"),
+                                                        html.Span("Dark mode", className="pill pill--invert"),
                                                     ],
-                                                    value="children",
                                                 ),
-
-                                                html.Hr(),
-                                                dcc.Checklist(
-                                                    id="edge_labels",
-                                                    options=[{"label": " Show edge labels", "value": "on"}],
-                                                    value=[],
+                                                html.Div(
+                                                    className="control-section",
+                                                    children=[
+                                                        html.Div("Document", className="control-label"),
+                                                        dcc.Dropdown(
+                                                            id="file",
+                                                            options=[{"label": f, "value": f} for f in files],
+                                                            value=(files[0] if files else None),
+                                                            clearable=False,
+                                                        ),
+                                                    ],
+                                                ),
+                                                html.Div(
+                                                    className="control-section",
+                                                    children=[
+                                                        html.Div("Page range", className="control-label"),
+                                                        dcc.RangeSlider(
+                                                            id="page_range",
+                                                            min=1,
+                                                            max=1,
+                                                            step=1,
+                                                            value=[1, 1],
+                                                            marks={},
+                                                            allowCross=False,
+                                                        ),
+                                                        html.Div(
+                                                            id="page_range_value",
+                                                            className="control-subtext",
+                                                        ),
+                                                    ],
+                                                ),
+                                                html.Div(
+                                                    className="control-section",
+                                                    children=[
+                                                        html.Div("Layout", className="control-label"),
+                                                        dcc.Dropdown(
+                                                            id="layout",
+                                                            options=[{"label": l, "value": v} for l, v in LAYOUTS],
+                                                            value=DEFAULT_VIEW["layout"],
+                                                            clearable=False,
+                                                        ),
+                                                    ],
+                                                ),
+                                                html.Div(
+                                                    className="control-section",
+                                                    children=[
+                                                        html.Div("Scaling ratio", className="control-label"),
+                                                        dcc.Slider(
+                                                            id="scaling_ratio",
+                                                            min=50,
+                                                            max=800,
+                                                            step=10,
+                                                            value=DEFAULT_VIEW["scaling_ratio"],
+                                                        ),
+                                                    ],
+                                                ),
+                                                html.Div(
+                                                    className="control-section",
+                                                    children=[
+                                                        html.Div("Expand", className="control-label"),
+                                                        dcc.RadioItems(
+                                                            id="expand_mode",
+                                                            options=[
+                                                                {"label": "Children (hier)", "value": "children"},
+                                                                {"label": "All outgoing", "value": "out"},
+                                                                {"label": "All incoming", "value": "in"},
+                                                            ],
+                                                            value="children",
+                                                            inputClassName="control-radio",
+                                                            labelClassName="control-radio__label",
+                                                        ),
+                                                    ],
+                                                ),
+                                                html.Div(
+                                                    className="control-section control-section--tight",
+                                                    children=[
+                                                        dcc.Checklist(
+                                                            id="edge_labels",
+                                                            options=[{"label": " Show edge labels", "value": "on"}],
+                                                            value=[],
+                                                            inputClassName="control-checkbox",
+                                                            labelClassName="control-checkbox__label",
+                                                        ),
+                                                    ],
                                                 ),
                                             ],
                                         )
                                     ],
                                 ),
                                 dcc.Tab(
+                                    className="control-tab",
+                                    selected_className="control-tab--selected",
                                     label="JSON",
                                     children=[
                                         html.Div(
-                                            style={"padding": "10px"},
+                                            className="control-panel control-panel--secondary",
                                             children=[
+                                                html.Div(
+                                                    className="control-panel__header",
+                                                    children=[
+                                                        html.Div("Click to inspect", className="control-title"),
+                                                        html.Span("debug", className="pill"),
+                                                    ],
+                                                ),
                                                 html.Pre(id="tap-node-json-output", style={"height": "35vh", "overflowY": "auto"}),
                                                 html.Pre(id="tap-edge-json-output", style={"height": "35vh", "overflowY": "auto"}),
                                             ],
@@ -333,6 +386,18 @@ def init_page_range(path):
     return pmin, pmax, [pmin, min(pmax, pmin + 3)], {p: str(p) for p in pages if p == pmin or p == pmax or p % 5 == 0}
 
 
+@app.callback(Output("page_range_value", "children"), Input("page_range", "value"))
+def show_page_range(value):
+    if not value:
+        return ""
+
+    start, end = value
+    if start == end:
+        return f"Showing page {start}"
+
+    return f"Showing pages {start} to {end}"
+
+
 @app.callback(
     Output("graph", "elements", allow_duplicate=True),
     Input("graph", "tapNodeData"),
@@ -340,27 +405,81 @@ def init_page_range(path):
     State("store_graph", "data"),
     State("store_node_index", "data"),
     State("expand_mode", "value"),
+    State("page_range", "value"),
     prevent_initial_call=True,
 )
-def expand_on_click(node_data, elements, store_graph, node_index, mode):
-    if not node_data or not store_graph:
+def expand_on_click(node_data, elements, store_graph, node_index, mode, page_range):
+    if not node_data or not store_graph or not page_range:
         return no_update
 
     node_id = node_data.get("id")
     if not node_id:
         return no_update
 
+    start_page, end_page = page_range
+
+    def in_range(page):
+        return page is None or (start_page <= page <= end_page)
+
     existing_nodes = {e["data"]["id"] for e in elements if "id" in e.get("data", {})}
     existing_edges = {e["data"]["id"] for e in elements if "source" in e.get("data", {})}
 
-    # Prevent re-expansion
-    for e in elements:
-        if e.get("data", {}).get("id") == node_id and e["data"].get("expanded"):
-            return no_update
+    tapped_element = next((e for e in elements if e.get("data", {}).get("id") == node_id), None)
+    is_expanded = bool(tapped_element and tapped_element.get("data", {}).get("expanded"))
 
-    for e in elements:
-        if e.get("data", {}).get("id") == node_id:
-            e["data"]["expanded"] = True
+    def matches_mode(edge_data):
+        src, tgt, rel = (
+            edge_data.get("source"),
+            edge_data.get("target"),
+            edge_data.get("rel"),
+        )
+
+        if mode == "children":
+            return rel == "hier" and src == node_id
+        if mode == "out":
+            return src == node_id
+        if mode == "in":
+            return tgt == node_id
+
+        return False
+
+    if is_expanded:
+        # Contract: remove connected edges for the active mode and any orphaned nodes
+        remaining_edges = [
+            el
+            for el in elements
+            if "source" not in el.get("data", {}) or not matches_mode(el["data"])
+        ]
+
+        # Rebuild adjacency from remaining edges
+        connected_nodes = set()
+        for el in remaining_edges:
+            data = el.get("data", {})
+            if "source" in data:
+                connected_nodes.add(data.get("source"))
+                connected_nodes.add(data.get("target"))
+
+        contracted_elements = []
+        for el in remaining_edges:
+            data = el.get("data", {})
+            if "source" in data:
+                contracted_elements.append(el)
+                continue
+
+            nid = data.get("id")
+            if nid == node_id:
+                el["data"]["expanded"] = False
+                contracted_elements.append(el)
+                continue
+
+            # Keep the root document and any node still connected
+            if data.get("type") == "document" or nid in connected_nodes:
+                contracted_elements.append(el)
+
+        return contracted_elements
+
+    if tapped_element:
+        tapped_element["data"]["expanded"] = True
 
     new_nodes = []
     new_edges = []
@@ -379,10 +498,18 @@ def expand_on_click(node_data, elements, store_graph, node_index, mode):
         if d["id"] in existing_edges:
             continue
 
-        new_edges.append(ed)
         for nid in (src, tgt):
             if nid not in existing_nodes and nid in node_index:
-                new_nodes.append(node_index[nid])
+                candidate = node_index[nid]
+                if in_range(candidate.get("data", {}).get("page")):
+                    new_nodes.append(candidate)
+
+        if not in_range(node_index.get(src, {}).get("data", {}).get("page")):
+            continue
+        if not in_range(node_index.get(tgt, {}).get("data", {}).get("page")):
+            continue
+
+        new_edges.append(ed)
 
     if not new_nodes and not new_edges:
         return no_update
@@ -397,6 +524,41 @@ def expand_on_click(node_data, elements, store_graph, node_index, mode):
 )
 def update_layout(name, scaling):
     return layout_for(name, scaling)
+
+
+@app.callback(
+    Output("graph", "elements", allow_duplicate=True),
+    Input("page_range", "value"),
+    State("graph", "elements"),
+    prevent_initial_call=True,
+)
+def filter_elements_by_page(page_range, elements):
+    if not page_range or not elements:
+        return no_update
+
+    start_page, end_page = page_range
+    allowed_nodes = set()
+    filtered_nodes = []
+
+    for el in elements:
+        data = el.get("data", {})
+        if "source" in data:
+            continue
+
+        page = data.get("page")
+        if page is None or (start_page <= page <= end_page):
+            allowed_nodes.add(data.get("id"))
+            filtered_nodes.append(el)
+
+    filtered_edges = [
+        el
+        for el in elements
+        if "source" in el.get("data", {})
+        and el["data"].get("source") in allowed_nodes
+        and el["data"].get("target") in allowed_nodes
+    ]
+
+    return filtered_nodes + filtered_edges
 
 
 @app.callback(
