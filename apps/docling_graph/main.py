@@ -1,95 +1,58 @@
+from __future__ import annotations
+
 import os
+import json
 from dash import Dash, html, dcc, Input, Output, State, no_update
 import dash_cytoscape as cyto
 
-from .graph_builder import build_graph_from_docling_json, list_docling_files
+from .graph_builder import (
+    build_graph_from_docling_json,
+    list_docling_files,
+    GraphPayload,
+)
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Enable stable extra layouts
 try:
     cyto.load_extra_layouts()
 except Exception:
     pass
 
-app = Dash(
-    __name__,
-    title="Docling Graph Viewer",
-    assets_folder=os.path.join(APP_DIR, "assets"),
-)
 
-files = list_docling_files()
+# -------------------------------------------------
+# Helpers
+# -------------------------------------------------
+def to_cytoscape_elements(graph: GraphPayload):
+    return graph.nodes + graph.edges
 
+
+def pages_from_nodes(nodes):
+    return sorted(
+        {
+            n.get("data", {}).get("page")
+            for n in nodes
+            if n.get("data", {}).get("page") is not None
+        }
+    )
+
+
+# -------------------------------------------------
+# Layout + Styles (dark-mode, inverted demo)
+# -------------------------------------------------
 LAYOUTS = [
     ("Dagre (sequence)", "dagre"),
     ("Breadthfirst", "breadthfirst"),
     ("Force-directed (COSE)", "cose"),
     ("COSE-Bilkent", "cose-bilkent"),
     ("Cola (read text)", "cola"),
-    ("Force-Atlas2 (plugin)", "forceatlas2"),
+    ("Euler (quality force)", "euler"),
 ]
 
 
-def _page_set(elements):
-    return sorted(
-        {e["data"].get("page") for e in elements if e.get("data", {}).get("page") is not None}
-    )
-
-
-def _base_stylesheet(node_size: int, font_size: int, text_max_width: int, show_edge_labels: bool, show_edge_weights: bool):
-    edge_label = "data(label)" if show_edge_labels else ""
-    if show_edge_weights:
-        # if weight exists, append it (fallback to label only)
-        # Cytoscape doesn't support string concat here reliably; use weight alone if toggled
-        edge_label = "data(weight)"
-
-    return [
-        {
-            "selector": "node",
-            "style": {
-                "label": "data(label)",
-                "font-size": f"{font_size}px",
-                "text-wrap": "wrap",
-                "text-max-width": f"{text_max_width}px",
-                "color": "#e5e7eb",
-                "width": f"{node_size}px",
-                "height": f"{node_size}px",
-            },
-        },
-        {
-            "selector": "edge",
-            "style": {
-                "curve-style": "bezier",
-                "line-color": "#94a3b8",
-                "target-arrow-color": "#94a3b8",
-                "target-arrow-shape": "triangle",
-                "arrow-scale": 0.8,
-                "label": edge_label,
-                "font-size": "9px",
-                "text-rotation": "autorotate",
-                "text-background-opacity": 0.6,
-                "text-background-color": "#0b1220",
-                "text-background-padding": "2px",
-                "color": "#cbd5e1",
-            },
-        },
-        {"selector": ".document", "style": {"background-color": "#2563eb"}},
-        {"selector": ".section", "style": {"background-color": "#111827"}},
-        {"selector": ".item", "style": {"background-color": "#374151"}},
-        # selection highlight
-        {"selector": ":selected", "style": {"border-width": 3, "border-color": "#fbbf24"}},
-    ]
-
-
-def _layout_for(name: str, scaling_ratio: int):
-    """
-    'scaling_ratio' is modeled like GraphCommons' scaling ratio:
-    - ForceAtlas2: scalingRatio
-    - COSE: maps to nodeRepulsion + idealEdgeLength
-    - Cola: maps to nodeSpacing + edgeLength
-    - Dagre: maps to rankSep/nodeSep
-    """
-    name = name or "dagre"
+def layout_for(name: str, scaling_ratio: int):
     s = max(50, min(int(scaling_ratio or 250), 800))
+    name = name or "dagre"
 
     if name == "dagre":
         return {
@@ -97,7 +60,6 @@ def _layout_for(name: str, scaling_ratio: int):
             "rankDir": "TB",
             "rankSep": int(80 + (s * 0.6)),
             "nodeSep": int(30 + (s * 0.25)),
-            "edgeSep": 20,
             "fit": True,
             "padding": 30,
         }
@@ -114,11 +76,11 @@ def _layout_for(name: str, scaling_ratio: int):
             "padding": 30,
         }
 
-    if name == "cose":
+    if name in ("cose", "cose-bilkent", "euler"):
         return {
-            "name": "cose",
+            "name": name,
             "animate": True,
-            "randomize": True,
+            "randomize": False,
             "idealEdgeLength": int(60 + (s * 0.25)),
             "nodeRepulsion": int(2000 + (s * 12)),
             "gravity": 0.25,
@@ -127,433 +89,347 @@ def _layout_for(name: str, scaling_ratio: int):
             "padding": 30,
         }
 
-    if name == "cose-bilkent":
-        # bilkent uses edgeLength + nodeRepulsion style params too
-        return {
-            "name": "cose-bilkent",
-            "animate": True,
-            "randomize": True,
-            "idealEdgeLength": int(60 + (s * 0.25)),
-            "nodeRepulsion": int(2000 + (s * 12)),
-            "gravity": 0.25,
-            "numIter": 1200,
-            "fit": True,
-            "padding": 30,
-        }
-
-    if name == "forceatlas2":
-        # requires plugin JS in assets + init script (see file below)
-        return {
-            "name": "forceatlas2",
-            "animate": True,
-            "randomize": False,
-            "iterations": 1200,
-            "scalingRatio": float(s),
-            "gravity": 1.0,
-            "strongGravityMode": False,
-            "slowDown": 1.0,
-            "barnesHutOptimize": True,
-            "barnesHutTheta": 0.9,
-            "fit": True,
-            "padding": 30,
-        }
-
     return {"name": name, "fit": True, "padding": 30}
 
 
-# ---------------------------
-# App state for "View options"
-# ---------------------------
+def base_stylesheet(node_size, font_size, text_max_width, show_edge_labels):
+    return [
+        {
+            "selector": "node",
+            "style": {
+                "label": "data(label)",
+                "font-size": f"{font_size}px",
+                "text-wrap": "wrap",
+                "text-max-width": f"{text_max_width}px",
+                "color": "#E5E7EB",
+                "text-outline-width": 1,
+                "text-outline-color": "#0B1220",
+                "width": f"{node_size}px",
+                "height": f"{node_size}px",
+                "z-index": 9999,
+            },
+        },
+        {
+            "selector": "edge",
+            "style": {
+                "curve-style": "bezier",
+                "line-color": "#64748B",
+                "target-arrow-color": "#64748B",
+                "target-arrow-shape": "triangle",
+                "arrow-scale": 0.8,
+                "opacity": 0.55,
+                "label": "data(rel)" if show_edge_labels else "",
+                "font-size": "9px",
+                "color": "#CBD5E1",
+                "z-index": 5000,
+            },
+        },
+        {"selector": ".document", "style": {"background-color": "#1D4ED8"}},
+        {"selector": ".section", "style": {"background-color": "#111827"}},
+        {"selector": ".item", "style": {"background-color": "#334155"}},
+        {"selector": ":selected", "style": {"border-width": 3, "border-color": "#FBBF24"}},
+    ]
+
+
+# -------------------------------------------------
+# App + Defaults
+# -------------------------------------------------
+files = list_docling_files()
+
 DEFAULT_VIEW = {
     "layout": "dagre",
     "scaling_ratio": 250,
     "node_size": 22,
-    "shorten_labels": True,     # GraphCommons: "Shorten node labels"
-    "adjust_labels": False,     # our lightweight toggle
-    "show_edge_labels": False,
-    "show_edge_weights": False,
     "font_size": 10,
     "text_max_width": 520,
+    "show_edge_labels": False,
 }
 
+app = Dash(
+    __name__,
+    title="Docling Graph Viewer",
+    assets_folder=os.path.join(APP_DIR, "assets"),
+)
+server = app.server
+
+
+# -------------------------------------------------
+# Layout (demo-style + stores)
+# -------------------------------------------------
 app.layout = html.Div(
-    className="app",
     children=[
-        dcc.Store(id="view_state", data=DEFAULT_VIEW),
+        dcc.Store(id="store_graph"),
+        dcc.Store(id="store_node_index"),
 
         html.Div(
-            className="topbar",
+            className="row",
             children=[
-                html.Div(className="title", children="Docling Graph Viewer"),
-                html.Button("View options", id="btn_view_options", className="btn"),
-            ],
-        ),
-
-        html.Div(
-            className="controls",
-            children=[
-                dcc.Dropdown(
-                    id="file",
-                    options=[{"label": f, "value": f} for f in files],
-                    value=(files[0] if files else None),
-                    clearable=False,
-                    style={"minWidth": "520px"},
-                ),
+                # LEFT — Graph
                 html.Div(
-                    style={"minWidth": "520px"},
+                    className="eight columns",
                     children=[
-                        html.Div("Page range", style={"fontSize": "12px", "opacity": 0.85}),
-                        dcc.RangeSlider(
-                            id="page_range",
-                            min=1,
-                            max=1,
-                            step=1,
-                            value=[1, 1],
-                            marks={},
-                            tooltip={"placement": "bottom", "always_visible": False},
-                            allowCross=False,
-                        ),
-                    ],
-                ),
-                dcc.Dropdown(id="type", placeholder="Type: ALL", clearable=False, style={"width": "160px"}),
-                dcc.Dropdown(id="layer", placeholder="Layer: ALL", clearable=False, style={"width": "180px"}),
-            ],
-        ),
-
-        # Graph
-        cyto.Cytoscape(
-            id="graph",
-            style={"width": "100%", "height": "85vh"},
-            wheelSensitivity=0.01,
-            minZoom=0.25,
-            maxZoom=2.0,
-            layout=_layout_for(DEFAULT_VIEW["layout"], DEFAULT_VIEW["scaling_ratio"]),
-            stylesheet=_base_stylesheet(
-                DEFAULT_VIEW["node_size"],
-                DEFAULT_VIEW["font_size"],
-                DEFAULT_VIEW["text_max_width"],
-                DEFAULT_VIEW["show_edge_labels"],
-                DEFAULT_VIEW["show_edge_weights"],
-            ),
-            elements=[],
-        ),
-
-        # Right-side "View options" panel (GraphCommons-like)
-        html.Div(
-            id="view_panel",
-            className="panel hidden",
-            children=[
-                html.Div(
-                    className="panel-header",
-                    children=[
-                        html.Div("View options", className="panel-title"),
-                        html.Button("×", id="btn_close_panel", className="btn-close"),
+                        cyto.Cytoscape(
+                            id="graph",
+                            style={
+                                "width": "100%",
+                                "height": "85vh",
+                                "backgroundColor": "#0B0F17",
+                            },
+                            wheelSensitivity=0.01,
+                            minZoom=0.25,
+                            maxZoom=2.0,
+                            layout=layout_for(
+                                DEFAULT_VIEW["layout"],
+                                DEFAULT_VIEW["scaling_ratio"],
+                            ),
+                            stylesheet=base_stylesheet(
+                                DEFAULT_VIEW["node_size"],
+                                DEFAULT_VIEW["font_size"],
+                                DEFAULT_VIEW["text_max_width"],
+                                DEFAULT_VIEW["show_edge_labels"],
+                            ),
+                            elements=[],
+                        )
                     ],
                 ),
 
+                # RIGHT — Control Panel
                 html.Div(
-                    className="panel-section",
+                    className="four columns",
                     children=[
-                        html.Div("Layout", className="section-title"),
-                        dcc.Dropdown(
-                            id="opt_layout",
-                            options=[{"label": l, "value": v} for l, v in LAYOUTS],
-                            value=DEFAULT_VIEW["layout"],
-                            clearable=False,
-                        ),
-                        html.Div("Scaling ratio", className="section-title", style={"marginTop": "10px"}),
-                        dcc.Slider(
-                            id="opt_scaling_ratio",
-                            min=50,
-                            max=800,
-                            step=10,
-                            value=DEFAULT_VIEW["scaling_ratio"],
-                            marks={50: "50", 250: "250", 500: "500", 800: "800"},
-                            tooltip={"placement": "bottom", "always_visible": False},
-                        ),
-                    ],
-                ),
-
-                html.Div(
-                    className="panel-section",
-                    children=[
-                        html.Div("Nodes", className="section-title"),
-                        html.Div(
-                            className="row",
+                        dcc.Tabs(
                             children=[
-                                html.Div("Adjust node size", className="muted"),
-                                html.Div(
-                                    className="row",
+                                dcc.Tab(
+                                    label="Control Panel",
                                     children=[
-                                        html.Button("−", id="opt_node_minus", className="btn-small"),
-                                        html.Button("+", id="opt_node_plus", className="btn-small"),
+                                        html.Div(
+                                            style={"padding": "10px"},
+                                            children=[
+                                                html.Label("Document"),
+                                                dcc.Dropdown(
+                                                    id="file",
+                                                    options=[{"label": f, "value": f} for f in files],
+                                                    value=(files[0] if files else None),
+                                                    clearable=False,
+                                                ),
+                                                html.Hr(),
+
+                                                html.Label("Page range"),
+                                                dcc.RangeSlider(
+                                                    id="page_range",
+                                                    min=1,
+                                                    max=1,
+                                                    step=1,
+                                                    value=[1, 1],
+                                                    marks={},
+                                                    allowCross=False,
+                                                ),
+                                                html.Hr(),
+
+                                                html.Label("Layout"),
+                                                dcc.Dropdown(
+                                                    id="layout",
+                                                    options=[{"label": l, "value": v} for l, v in LAYOUTS],
+                                                    value=DEFAULT_VIEW["layout"],
+                                                    clearable=False,
+                                                ),
+
+                                                html.Label("Scaling ratio"),
+                                                dcc.Slider(
+                                                    id="scaling_ratio",
+                                                    min=50,
+                                                    max=800,
+                                                    step=10,
+                                                    value=DEFAULT_VIEW["scaling_ratio"],
+                                                ),
+
+                                                html.Hr(),
+                                                html.Label("Expand"),
+                                                dcc.RadioItems(
+                                                    id="expand_mode",
+                                                    options=[
+                                                        {"label": "Children (hier)", "value": "children"},
+                                                        {"label": "All outgoing", "value": "out"},
+                                                        {"label": "All incoming", "value": "in"},
+                                                    ],
+                                                    value="children",
+                                                ),
+
+                                                html.Hr(),
+                                                dcc.Checklist(
+                                                    id="edge_labels",
+                                                    options=[{"label": " Show edge labels", "value": "on"}],
+                                                    value=[],
+                                                ),
+                                            ],
+                                        )
                                     ],
                                 ),
-                            ],
-                        ),
-                        dcc.Checklist(
-                            id="opt_node_checks",
-                            options=[
-                                {"label": " Shorten node labels", "value": "shorten"},
-                                {"label": " Adjust node label overlaps", "value": "adjust"},
-                            ],
-                            value=[
-                                "shorten" if DEFAULT_VIEW["shorten_labels"] else None,
-                            ],
-                        ),
-                        html.Button("Reset positions (re-run layout)", id="opt_reset_layout", className="btn", style={"marginTop": "8px"}),
-                    ],
-                ),
-
-                html.Div(
-                    className="panel-section",
-                    children=[
-                        html.Div("Edges", className="section-title"),
-                        dcc.Checklist(
-                            id="opt_edge_checks",
-                            options=[
-                                {"label": " Always display edge labels", "value": "labels"},
-                                {"label": " Show edge weights on labels", "value": "weights"},
-                            ],
-                            value=[],
-                        ),
-                    ],
-                ),
-
-                html.Div(
-                    className="panel-footer",
-                    children=[
-                        html.Button("Apply", id="opt_apply", className="btn-primary"),
+                                dcc.Tab(
+                                    label="JSON",
+                                    children=[
+                                        html.Div(
+                                            style={"padding": "10px"},
+                                            children=[
+                                                html.Pre(id="tap-node-json-output", style={"height": "35vh", "overflowY": "auto"}),
+                                                html.Pre(id="tap-edge-json-output", style={"height": "35vh", "overflowY": "auto"}),
+                                            ],
+                                        )
+                                    ],
+                                ),
+                            ]
+                        )
                     ],
                 ),
             ],
         ),
-    ],
+    ]
 )
 
 
-# ---------------------------
-# Populate page slider + type/layer options
-# ---------------------------
+# -------------------------------------------------
+# Callbacks
+# -------------------------------------------------
+@app.callback(
+    Output("graph", "elements"),
+    Output("store_graph", "data"),
+    Output("store_node_index", "data"),
+    Input("file", "value"),
+)
+def load_graph(path):
+    if not path:
+        return [], None, None
+
+    g = build_graph_from_docling_json(path)
+
+    node_index = {n["data"]["id"]: n for n in g.nodes if n.get("data", {}).get("id")}
+
+    # Genesis node: document
+    doc_node = next((n for n in g.nodes if n["data"].get("type") == "document"), None)
+    elements = [doc_node] if doc_node else []
+
+    store_graph = {"nodes": g.nodes, "edges": g.edges}
+
+    return elements, store_graph, node_index
+
+
 @app.callback(
     Output("page_range", "min"),
     Output("page_range", "max"),
     Output("page_range", "value"),
     Output("page_range", "marks"),
-    Output("type", "options"),
-    Output("type", "value"),
-    Output("layer", "options"),
-    Output("layer", "value"),
     Input("file", "value"),
 )
-def populate_filters(path):
+def init_page_range(path):
     if not path:
-        return 1, 1, [1, 1], {}, [{"label": "ALL", "value": "ALL"}], "ALL", [{"label": "ALL", "value": "ALL"}], "ALL"
+        return 1, 1, [1, 1], {}
 
-    els = build_graph_from_docling_json(path)
-    pages = _page_set(els) or [1]
+    g = build_graph_from_docling_json(path)
+    pages = pages_from_nodes(g.nodes)
+    if not pages:
+        return 1, 1, [1, 1], {}
+
     pmin, pmax = pages[0], pages[-1]
-
-    default_hi = min(pmax, pmin + 3)
-    default_value = [pmin, default_hi]
-
-    marks = {}
-    for p in pages:
-        if p == pmin or p == pmax or p % 5 == 0:
-            marks[p] = str(p)
-
-    types = sorted({e["data"].get("type") for e in els if e.get("data", {}).get("type")})
-    layers = sorted({e["data"].get("content_layer") for e in els if e.get("data", {}).get("content_layer")})
-
-    type_opts = [{"label": "ALL", "value": "ALL"}] + [{"label": t, "value": t} for t in types]
-    layer_opts = [{"label": "ALL", "value": "ALL"}] + [{"label": l, "value": l} for l in layers]
-
-    return pmin, pmax, default_value, marks, type_opts, "ALL", layer_opts, "ALL"
+    return pmin, pmax, [pmin, min(pmax, pmin + 3)], {p: str(p) for p in pages if p == pmin or p == pmax or p % 5 == 0}
 
 
-# ---------------------------
-# Panel open/close
-# ---------------------------
 @app.callback(
-    Output("view_panel", "className"),
-    Input("btn_view_options", "n_clicks"),
-    Input("btn_close_panel", "n_clicks"),
-    State("view_panel", "className"),
+    Output("graph", "elements", allow_duplicate=True),
+    Input("graph", "tapNodeData"),
+    State("graph", "elements"),
+    State("store_graph", "data"),
+    State("store_node_index", "data"),
+    State("expand_mode", "value"),
     prevent_initial_call=True,
 )
-def toggle_panel(open_clicks, close_clicks, current):
-    current = current or "panel hidden"
-    ctx = __import__("dash").callback_context
-    if not ctx.triggered:
-        return current
-    trig = ctx.triggered[0]["prop_id"].split(".")[0]
-    if trig == "btn_view_options":
-        return "panel"  # show
-    return "panel hidden"  # hide
+def expand_on_click(node_data, elements, store_graph, node_index, mode):
+    if not node_data or not store_graph:
+        return no_update
+
+    node_id = node_data.get("id")
+    if not node_id:
+        return no_update
+
+    existing_nodes = {e["data"]["id"] for e in elements if "id" in e.get("data", {})}
+    existing_edges = {e["data"]["id"] for e in elements if "source" in e.get("data", {})}
+
+    # Prevent re-expansion
+    for e in elements:
+        if e.get("data", {}).get("id") == node_id and e["data"].get("expanded"):
+            return no_update
+
+    for e in elements:
+        if e.get("data", {}).get("id") == node_id:
+            e["data"]["expanded"] = True
+
+    new_nodes = []
+    new_edges = []
+
+    for ed in store_graph["edges"]:
+        d = ed["data"]
+        src, tgt, rel = d.get("source"), d.get("target"), d.get("rel")
+
+        if mode == "children" and not (rel == "hier" and src == node_id):
+            continue
+        if mode == "out" and src != node_id:
+            continue
+        if mode == "in" and tgt != node_id:
+            continue
+
+        if d["id"] in existing_edges:
+            continue
+
+        new_edges.append(ed)
+        for nid in (src, tgt):
+            if nid not in existing_nodes and nid in node_index:
+                new_nodes.append(node_index[nid])
+
+    if not new_nodes and not new_edges:
+        return no_update
+
+    return elements + new_nodes + new_edges
 
 
-# ---------------------------
-# Node size +/- buttons update view_state draft values
-# ---------------------------
 @app.callback(
-    Output("opt_scaling_ratio", "value"),
-    Output("view_state", "data"),
-    Input("opt_node_plus", "n_clicks"),
-    Input("opt_node_minus", "n_clicks"),
-    Input("opt_reset_layout", "n_clicks"),
-    State("view_state", "data"),
-    State("opt_scaling_ratio", "value"),
-    prevent_initial_call=True,
-)
-def bump_node_size(n_plus, n_minus, n_reset, view, scaling):
-    view = dict(view or DEFAULT_VIEW)
-    ctx = __import__("dash").callback_context
-    trig = ctx.triggered[0]["prop_id"].split(".")[0]
-
-    if trig == "opt_node_plus":
-        view["node_size"] = min(60, int(view.get("node_size", 22)) + 2)
-    elif trig == "opt_node_minus":
-        view["node_size"] = max(6, int(view.get("node_size", 22)) - 2)
-    elif trig == "opt_reset_layout":
-        # no direct position capture; we re-run layout by bumping a dummy param in state later on Apply
-        view["_rerun"] = int(view.get("_rerun", 0)) + 1
-
-    # keep slider value unchanged
-    return scaling, view
-
-
-# ---------------------------
-# Apply view options to graph (stylesheet + layout)
-# ---------------------------
-@app.callback(
-    Output("view_state", "data", allow_duplicate=True),
-    Output("graph", "stylesheet"),
     Output("graph", "layout"),
-    Output("graph", "elements"),
-    Input("opt_apply", "n_clicks"),
-    State("file", "value"),
-    State("page_range", "value"),
-    State("type", "value"),
-    State("layer", "value"),
-    State("opt_layout", "value"),
-    State("opt_scaling_ratio", "value"),
-    State("opt_node_checks", "value"),
-    State("opt_edge_checks", "value"),
-    State("view_state", "data"),
-    prevent_initial_call=True,
+    Input("layout", "value"),
+    Input("scaling_ratio", "value"),
 )
-def apply_view(n_apply, path, page_range, typ, layer, layout_name, scaling_ratio, node_checks, edge_checks, view):
-    if not path:
-        return no_update, no_update, no_update, []
+def update_layout(name, scaling):
+    return layout_for(name, scaling)
 
-    view = dict(view or DEFAULT_VIEW)
-    node_checks = node_checks or []
-    edge_checks = edge_checks or []
 
-    view["layout"] = layout_name or "dagre"
-    view["scaling_ratio"] = int(scaling_ratio or 250)
-    view["shorten_labels"] = ("shorten" in node_checks)
-    view["adjust_labels"] = ("adjust" in node_checks)
-    view["show_edge_labels"] = ("labels" in edge_checks)
-    view["show_edge_weights"] = ("weights" in edge_checks)
-
-    # lightweight “adjust overlaps” effect: reduce font + width so labels collide less
-    if view["adjust_labels"]:
-        view["font_size"] = 9
-        view["text_max_width"] = 320
-    else:
-        view["font_size"] = 10
-        view["text_max_width"] = 520
-
-    els = build_graph_from_docling_json(path)
-
-    lo, hi = 1, 10**9
-    if isinstance(page_range, (list, tuple)) and len(page_range) == 2:
-        lo, hi = int(page_range[0]), int(page_range[1])
-
-    keep = set()
-    for e in els:
-        d = e.get("data", {})
-        nid = d.get("id")
-        if not nid:
-            continue
-
-        if d.get("type") == "document":
-            keep.add(nid)
-            continue
-
-        page = d.get("page")
-        page_ok = True
-        if page is not None:
-            page_ok = lo <= int(page) <= hi
-
-        type_ok = typ in (None, "ALL") or d.get("type") == typ
-        layer_ok = layer in (None, "ALL") or d.get("content_layer") == layer
-
-        if page_ok and type_ok and layer_ok:
-            keep.add(nid)
-
-    # label mode switch
-    use_short = view["shorten_labels"] or (view["layout"] == "dagre")
-
-    out = []
-    for e in els:
-        d = e.get("data", {})
-        if "id" in d and d["id"] in keep:
-            new_e = dict(e)
-            new_d = dict(d)
-            new_d["label"] = new_d.get("label_short") if use_short else new_d.get("label_full")
-            new_e["data"] = new_d
-            out.append(new_e)
-        elif d.get("source") in keep and d.get("target") in keep:
-            out.append(e)
-
-    stylesheet = _base_stylesheet(
-        node_size=view["node_size"],
-        font_size=view["font_size"],
-        text_max_width=view["text_max_width"],
-        show_edge_labels=view["show_edge_labels"],
-        show_edge_weights=view["show_edge_weights"],
+@app.callback(
+    Output("graph", "stylesheet"),
+    Input("edge_labels", "value"),
+)
+def update_styles(edge_labels):
+    return base_stylesheet(
+        DEFAULT_VIEW["node_size"],
+        DEFAULT_VIEW["font_size"],
+        DEFAULT_VIEW["text_max_width"],
+        "on" in (edge_labels or []),
     )
 
-    layout = _layout_for(view["layout"], view["scaling_ratio"])
 
-    # if reset requested, force randomize where supported
-    if "_rerun" in view:
-        if layout.get("name") in ("cose", "cose-bilkent", "cola"):
-            layout["randomize"] = True
-        # clear the flag
-        view.pop("_rerun", None)
-
-    return view, stylesheet, layout, out
-
-
-# ---------------------------
-# Keep panel controls in sync with stored view_state (on load/refresh)
-# ---------------------------
 @app.callback(
-    Output("opt_layout", "value"),
-    Output("opt_scaling_ratio", "value"),
-    Output("opt_node_checks", "value"),
-    Output("opt_edge_checks", "value"),
-    Input("view_state", "data"),
+    Output("tap-node-json-output", "children"),
+    Input("graph", "tapNode"),
 )
-def sync_panel(view):
-    view = view or DEFAULT_VIEW
-    node_vals = []
-    if view.get("shorten_labels"):
-        node_vals.append("shorten")
-    if view.get("adjust_labels"):
-        node_vals.append("adjust")
-
-    edge_vals = []
-    if view.get("show_edge_labels"):
-        edge_vals.append("labels")
-    if view.get("show_edge_weights"):
-        edge_vals.append("weights")
-
-    return view.get("layout", "dagre"), view.get("scaling_ratio", 250), node_vals, edge_vals
+def show_node(data):
+    return json.dumps(data, indent=2)
 
 
+@app.callback(
+    Output("tap-edge-json-output", "children"),
+    Input("graph", "tapEdge"),
+)
+def show_edge(data):
+    return json.dumps(data, indent=2)
+
+
+# -------------------------------------------------
+# Run
+# -------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8050)

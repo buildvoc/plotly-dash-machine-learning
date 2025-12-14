@@ -3,7 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
+
 
 DOCLING_JSON_ROOT = "/home/hp/docling-ws/data/docling"
 
@@ -23,6 +25,18 @@ SKIP_TEXT_LABELS = {
 }
 
 
+# -----------------------------
+# Graph contract
+# -----------------------------
+@dataclass(frozen=True)
+class GraphPayload:
+    nodes: List[Dict[str, Any]]
+    edges: List[Dict[str, Any]]
+
+
+# -----------------------------
+# Helpers
+# -----------------------------
 def _nid(value: str) -> str:
     return "n_" + hashlib.md5(value.encode("utf-8")).hexdigest()[:12]
 
@@ -68,22 +82,27 @@ def _is_noise_text(label: str, text: str) -> bool:
     return False
 
 
-def build_graph_from_docling_json(path: str) -> List[Dict[str, Any]]:
+# -----------------------------
+# Core builder
+# -----------------------------
+def build_graph_from_docling_json(path: str) -> GraphPayload:
     """
-    Graph:
+    Graph shape:
         DOCUMENT → PAGE → TEXT
 
-    Stores BOTH:
-      - label_short (for compact layouts like Dagre)
-      - label_full  (for reading layouts like Cola)
+    Nodes and edges are returned separately
+    for Cytoscape stability and incremental expansion.
     """
     doc = _load_json(path)
-    elements: List[Dict[str, Any]] = []
+
+    nodes: List[Dict[str, Any]] = []
+    edges: List[Dict[str, Any]] = []
 
     doc_id = _nid(path)
     doc_name = os.path.basename(path)
 
-    elements.append(
+    # DOCUMENT node
+    nodes.append(
         {
             "data": {
                 "id": doc_id,
@@ -98,9 +117,10 @@ def build_graph_from_docling_json(path: str) -> List[Dict[str, Any]]:
 
     texts = doc.get("texts")
     if not isinstance(texts, list):
-        return elements
+        return GraphPayload(nodes=nodes, edges=edges)
 
     pages: Dict[int, List[Dict[str, Any]]] = {}
+
     for t in texts:
         if not isinstance(t, dict):
             continue
@@ -117,10 +137,11 @@ def build_graph_from_docling_json(path: str) -> List[Dict[str, Any]]:
 
         pages.setdefault(page_no, []).append(t)
 
+    # PAGE + TEXT nodes
     for page_no in sorted(pages.keys()):
         page_id = _nid(f"{path}::page::{page_no}")
 
-        elements.append(
+        nodes.append(
             {
                 "data": {
                     "id": page_id,
@@ -134,17 +155,22 @@ def build_graph_from_docling_json(path: str) -> List[Dict[str, Any]]:
             }
         )
 
-        elements.append({"data": {"source": doc_id, "target": page_id}, "classes": "hier"})
+        edges.append(
+            {
+                "data": {
+                    "id": _nid(f"{doc_id}__{page_id}"),
+                    "source": doc_id,
+                    "target": page_id,
+                    "rel": "hier",
+                },
+                "classes": "hier",
+            }
+        )
 
-        page_texts = pages[page_no]
-        if MAX_TEXTS_PER_PAGE is not None:
-            page_texts = page_texts[:MAX_TEXTS_PER_PAGE]
+        page_texts = pages[page_no][:MAX_TEXTS_PER_PAGE]
 
         for t in page_texts:
-            ref = t.get("self_ref") or t.get("id")
-            if not isinstance(ref, str):
-                ref = f"{path}::p{page_no}::{hashlib.md5(str(t).encode()).hexdigest()}"
-
+            ref = t.get("self_ref") or t.get("id") or repr(t)
             text_id = _nid(ref)
 
             raw_text = str(t.get("text") or "")
@@ -155,7 +181,7 @@ def build_graph_from_docling_json(path: str) -> List[Dict[str, Any]]:
             label_full = f"{dtype}: {raw_text}"
             label_short = f"{dtype}: {_short(raw_text, 140)}"
 
-            elements.append(
+            nodes.append(
                 {
                     "data": {
                         "id": text_id,
@@ -172,6 +198,16 @@ def build_graph_from_docling_json(path: str) -> List[Dict[str, Any]]:
                 }
             )
 
-            elements.append({"data": {"source": page_id, "target": text_id}, "classes": "hier"})
+            edges.append(
+                {
+                    "data": {
+                        "id": _nid(f"{page_id}__{text_id}"),
+                        "source": page_id,
+                        "target": text_id,
+                        "rel": "hier",
+                    },
+                    "classes": "hier",
+                }
+            )
 
-    return elements
+    return GraphPayload(nodes=nodes, edges=edges)
