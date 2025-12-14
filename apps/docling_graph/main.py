@@ -93,6 +93,19 @@ def layout_for(name: str, scaling_ratio: int):
 
 
 def base_stylesheet(node_size, font_size, text_max_width, show_edge_labels):
+    palette = {
+        "ink": "#0B1020",
+        "panel": "#111827",
+        "muted": "#94A3B8",
+        "text": "#E5E7EB",
+        "document": "#7C3AED",
+        "section": "#22D3EE",
+        "item": "#14B8A6",
+        "edge": "#94A3B8",
+        "edge_alt": "#A5B4FC",
+        "selection": "#FBBF24",
+    }
+
     return [
         {
             "selector": "node",
@@ -101,33 +114,73 @@ def base_stylesheet(node_size, font_size, text_max_width, show_edge_labels):
                 "font-size": f"{font_size}px",
                 "text-wrap": "wrap",
                 "text-max-width": f"{text_max_width}px",
-                "color": "#E5E7EB",
+                "color": palette["text"],
                 "text-outline-width": 1,
-                "text-outline-color": "#0B1220",
+                "text-outline-color": palette["ink"],
                 "width": f"{node_size}px",
                 "height": f"{node_size}px",
                 "z-index": 9999,
+                "background-color": palette["panel"],
+                "border-width": 1.5,
+                "border-color": palette["edge_alt"],
+            },
+        },
+        {
+            "selector": ".document",
+            "style": {
+                "background-color": palette["document"],
+                "border-color": "#C084FC",
+                "shadow-blur": 20,
+                "shadow-color": "rgba(124,58,237,0.5)",
+            },
+        },
+        {
+            "selector": ".section",
+            "style": {
+                "background-color": palette["section"],
+                "border-color": "#67E8F9",
+            },
+        },
+        {
+            "selector": ".item",
+            "style": {
+                "background-color": palette["item"],
+                "border-color": "#5EEAD4",
             },
         },
         {
             "selector": "edge",
             "style": {
                 "curve-style": "bezier",
-                "line-color": "#64748B",
-                "target-arrow-color": "#64748B",
+                "line-color": palette["edge"],
+                "target-arrow-color": palette["edge"],
                 "target-arrow-shape": "triangle",
-                "arrow-scale": 0.8,
-                "opacity": 0.55,
+                "arrow-scale": 0.9,
+                "opacity": 0.7,
                 "label": "data(rel)" if show_edge_labels else "",
                 "font-size": "9px",
-                "color": "#CBD5E1",
+                "color": palette["text"],
                 "z-index": 5000,
+                "width": "mapData(weight, 1, 3, 1.5, 5)",
             },
         },
-        {"selector": ".document", "style": {"background-color": "#1D4ED8"}},
-        {"selector": ".section", "style": {"background-color": "#111827"}},
-        {"selector": ".item", "style": {"background-color": "#334155"}},
-        {"selector": ":selected", "style": {"border-width": 3, "border-color": "#FBBF24"}},
+        {
+            "selector": ".hier",
+            "style": {
+                "line-color": palette["edge_alt"],
+                "target-arrow-color": palette["edge_alt"],
+            },
+        },
+        {
+            "selector": ":selected",
+            "style": {
+                "border-width": 3,
+                "border-color": palette["selection"],
+                "line-color": palette["selection"],
+                "target-arrow-color": palette["selection"],
+                "text-outline-color": palette["ink"],
+            },
+        },
     ]
 
 

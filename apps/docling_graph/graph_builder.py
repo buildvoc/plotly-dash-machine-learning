@@ -173,6 +173,7 @@ def build_graph_from_docling_json(path: str) -> GraphPayload:
                     "source": doc_id,
                     "target": page_id,
                     "rel": "hier",
+                    "weight": 3,
                 },
                 "classes": "hier",
             }
@@ -216,6 +217,7 @@ def build_graph_from_docling_json(path: str) -> GraphPayload:
                         "source": page_id,
                         "target": text_id,
                         "rel": "hier",
+                        "weight": 1,
                     },
                     "classes": "hier",
                 }
