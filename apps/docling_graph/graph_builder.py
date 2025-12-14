@@ -3,7 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
+import unittest
+from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -60,9 +64,11 @@ def _short(text: str, limit: int = 120) -> str:
     return t[:limit] + ("…" if len(t) > limit else "")
 
 
-def list_docling_files() -> List[str]:
+def list_docling_files(json_root: Optional[str] = None) -> List[str]:
     results: List[str] = []
-    for root, _, files in os.walk(DOCLING_JSON_ROOT):
+    search_root = json_root or DOCLING_JSON_ROOT
+
+    for root, _, files in os.walk(search_root):
         for name in files:
             if name.lower().endswith(".json"):
                 results.append(os.path.join(root, name))
@@ -85,6 +91,31 @@ def _is_noise_text(label: str, text: str) -> bool:
 # -----------------------------
 # Core builder
 # -----------------------------
+def _collect_pages_from_texts(texts: Iterable[Any]) -> Dict[int, List[Dict[str, Any]]]:
+    pages: Dict[int, List[Dict[str, Any]]] = {}
+
+    if not isinstance(texts, Iterable):
+        return pages
+
+    for t in texts:
+        if not isinstance(t, dict):
+            continue
+
+        raw_label = str(t.get("label") or "text")
+        raw_text = str(t.get("text") or "")
+
+        if _is_noise_text(raw_label, raw_text):
+            continue
+
+        page_no, _ = _first_prov(t)
+        if page_no is None:
+            continue
+
+        pages.setdefault(page_no, []).append(t)
+
+    return pages
+
+
 def build_graph_from_docling_json(path: str) -> GraphPayload:
     """
     Graph shape:
@@ -115,27 +146,7 @@ def build_graph_from_docling_json(path: str) -> GraphPayload:
         }
     )
 
-    texts = doc.get("texts")
-    if not isinstance(texts, list):
-        return GraphPayload(nodes=nodes, edges=edges)
-
-    pages: Dict[int, List[Dict[str, Any]]] = {}
-
-    for t in texts:
-        if not isinstance(t, dict):
-            continue
-
-        raw_label = str(t.get("label") or "text")
-        raw_text = str(t.get("text") or "")
-
-        if _is_noise_text(raw_label, raw_text):
-            continue
-
-        page_no, _ = _first_prov(t)
-        if page_no is None:
-            continue
-
-        pages.setdefault(page_no, []).append(t)
+    pages = _collect_pages_from_texts(doc.get("texts"))
 
     # PAGE + TEXT nodes
     for page_no in sorted(pages.keys()):
@@ -211,3 +222,82 @@ def build_graph_from_docling_json(path: str) -> GraphPayload:
             )
 
     return GraphPayload(nodes=nodes, edges=edges)
+
+
+# -----------------------------
+# Tests
+# -----------------------------
+
+
+class GraphBuilderTests(unittest.TestCase):
+    def test_is_noise_text_filters_short_or_skipped_labels(self):
+        self.assertTrue(_is_noise_text("body", "too short"))
+        self.assertTrue(_is_noise_text("header", "x" * (MIN_TEXT_LEN + 5)))
+        self.assertFalse(_is_noise_text("body", "x" * (MIN_TEXT_LEN + 5)))
+
+    def test_collect_pages_from_texts_filters_invalid_entries(self):
+        long_text = "content " * 10
+        pages = _collect_pages_from_texts(
+            [
+                {"label": "body", "text": long_text, "prov": [{"page_no": 2}]},
+                {"label": "header", "text": long_text, "prov": [{"page_no": 3}]},
+                {"label": "body", "text": "", "prov": [{"page_no": 4}]},
+                "not a dict",
+                {"label": "body", "text": long_text},
+            ]
+        )
+
+        self.assertEqual(sorted(pages.keys()), [2])
+        self.assertEqual(len(pages[2]), 1)
+
+    def test_build_graph_from_docling_json_emits_document_page_and_text(self):
+        doc = {
+            "texts": [
+                {
+                    "label": "body",
+                    "text": "paragraph " * 10,
+                    "prov": [{"page_no": 1, "bbox": [0, 0, 10, 10]}],
+                }
+            ]
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
+            json.dump(doc, tmp)
+            tmp_path = tmp.name
+
+        try:
+            payload = build_graph_from_docling_json(tmp_path)
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+        self.assertEqual(len(payload.nodes), 3)
+        self.assertEqual(len(payload.edges), 2)
+
+        node_ids = {n["data"]["id"] for n in payload.nodes}
+        edge_pairs = {(e["data"]["source"], e["data"]["target"]) for e in payload.edges}
+
+        doc_id = _nid(tmp_path)
+        page_id = _nid(f"{tmp_path}::page::1")
+        text_id = next(n["data"]["id"] for n in payload.nodes if n["data"]["type"] == "text")
+
+        self.assertIn(doc_id, node_ids)
+        self.assertIn(page_id, node_ids)
+        self.assertEqual(edge_pairs, {(doc_id, page_id), (page_id, text_id)})
+
+    def test_list_docling_files_accepts_custom_root(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            nested = Path(tmpdir) / "nested"
+            nested.mkdir()
+
+            first = nested / "a.json"
+            second = nested / "B.JSON"
+            first.write_text("{}", encoding="utf-8")
+            second.write_text("{}", encoding="utf-8")
+
+            results = list_docling_files(str(tmpdir))
+
+        self.assertEqual(results, sorted([str(first), str(second)]))
+
+
+if __name__ == "__main__":
+    unittest.main()
