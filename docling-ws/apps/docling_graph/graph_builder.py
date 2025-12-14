@@ -5,7 +5,9 @@ import json
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-DOCLING_JSON_ROOT = "/home/hp/docling-ws/data/docling"
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
+DEFAULT_JSON_ROOT = os.path.join(REPO_ROOT, "data", "docling")
+DOCLING_JSON_ROOT = os.environ.get("DOCLING_JSON_ROOT", DEFAULT_JSON_ROOT)
 
 MIN_TEXT_LEN = 40
 MAX_TEXTS_PER_PAGE = 250
