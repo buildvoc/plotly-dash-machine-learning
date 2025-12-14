@@ -11,7 +11,22 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
-DOCLING_JSON_ROOT = "/home/hp/docling-ws/data/docling"
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
+DEFAULT_JSON_ROOT = os.path.join(REPO_ROOT, "data", "docling")
+
+
+def _docling_json_root() -> str:
+    override = os.environ.get("DOCLING_JSON_ROOT")
+    if not override:
+        return DEFAULT_JSON_ROOT
+
+    if not os.path.isabs(override):
+        return os.path.abspath(os.path.join(REPO_ROOT, override))
+
+    return override
+
+
+DOCLING_JSON_ROOT = _docling_json_root()
 
 MIN_TEXT_LEN = 40
 MAX_TEXTS_PER_PAGE = 250
@@ -173,6 +188,7 @@ def build_graph_from_docling_json(path: str) -> GraphPayload:
                     "source": doc_id,
                     "target": page_id,
                     "rel": "hier",
+                    "weight": 3,
                 },
                 "classes": "hier",
             }
@@ -216,6 +232,7 @@ def build_graph_from_docling_json(path: str) -> GraphPayload:
                         "source": page_id,
                         "target": text_id,
                         "rel": "hier",
+                        "weight": 1,
                     },
                     "classes": "hier",
                 }

@@ -93,6 +93,19 @@ def layout_for(name: str, scaling_ratio: int):
 
 
 def base_stylesheet(node_size, font_size, text_max_width, show_edge_labels):
+    palette = {
+        "ink": "#0B1020",
+        "panel": "#111827",
+        "muted": "#94A3B8",
+        "text": "#E5E7EB",
+        "document": "#7C3AED",
+        "section": "#22D3EE",
+        "item": "#14B8A6",
+        "edge": "#94A3B8",
+        "edge_alt": "#A5B4FC",
+        "selection": "#FBBF24",
+    }
+
     return [
         {
             "selector": "node",
@@ -101,33 +114,73 @@ def base_stylesheet(node_size, font_size, text_max_width, show_edge_labels):
                 "font-size": f"{font_size}px",
                 "text-wrap": "wrap",
                 "text-max-width": f"{text_max_width}px",
-                "color": "#E5E7EB",
+                "color": palette["text"],
                 "text-outline-width": 1,
-                "text-outline-color": "#0B1220",
+                "text-outline-color": palette["ink"],
                 "width": f"{node_size}px",
                 "height": f"{node_size}px",
                 "z-index": 9999,
+                "background-color": palette["panel"],
+                "border-width": 1.5,
+                "border-color": palette["edge_alt"],
+            },
+        },
+        {
+            "selector": ".document",
+            "style": {
+                "background-color": palette["document"],
+                "border-color": "#C084FC",
+                "shadow-blur": 20,
+                "shadow-color": "rgba(124,58,237,0.5)",
+            },
+        },
+        {
+            "selector": ".section",
+            "style": {
+                "background-color": palette["section"],
+                "border-color": "#67E8F9",
+            },
+        },
+        {
+            "selector": ".item",
+            "style": {
+                "background-color": palette["item"],
+                "border-color": "#5EEAD4",
             },
         },
         {
             "selector": "edge",
             "style": {
                 "curve-style": "bezier",
-                "line-color": "#64748B",
-                "target-arrow-color": "#64748B",
+                "line-color": palette["edge"],
+                "target-arrow-color": palette["edge"],
                 "target-arrow-shape": "triangle",
-                "arrow-scale": 0.8,
-                "opacity": 0.55,
+                "arrow-scale": 0.9,
+                "opacity": 0.7,
                 "label": "data(rel)" if show_edge_labels else "",
                 "font-size": "9px",
-                "color": "#CBD5E1",
+                "color": palette["text"],
                 "z-index": 5000,
+                "width": "mapData(weight, 1, 3, 1.5, 5)",
             },
         },
-        {"selector": ".document", "style": {"background-color": "#1D4ED8"}},
-        {"selector": ".section", "style": {"background-color": "#111827"}},
-        {"selector": ".item", "style": {"background-color": "#334155"}},
-        {"selector": ":selected", "style": {"border-width": 3, "border-color": "#FBBF24"}},
+        {
+            "selector": ".hier",
+            "style": {
+                "line-color": palette["edge_alt"],
+                "target-arrow-color": palette["edge_alt"],
+            },
+        },
+        {
+            "selector": ":selected",
+            "style": {
+                "border-width": 3,
+                "border-color": palette["selection"],
+                "line-color": palette["selection"],
+                "target-arrow-color": palette["selection"],
+                "text-outline-color": palette["ink"],
+            },
+        },
     ]
 
 
@@ -424,6 +477,62 @@ def expand_on_click(node_data, elements, store_graph, node_index, mode, page_ran
     existing_nodes = {e["data"]["id"] for e in elements if "id" in e.get("data", {})}
     existing_edges = {e["data"]["id"] for e in elements if "source" in e.get("data", {})}
 
+    tapped_element = next((e for e in elements if e.get("data", {}).get("id") == node_id), None)
+    is_expanded = bool(tapped_element and tapped_element.get("data", {}).get("expanded"))
+
+    def matches_mode(edge_data):
+        src, tgt, rel = (
+            edge_data.get("source"),
+            edge_data.get("target"),
+            edge_data.get("rel"),
+        )
+
+        if mode == "children":
+            return rel == "hier" and src == node_id
+        if mode == "out":
+            return src == node_id
+        if mode == "in":
+            return tgt == node_id
+
+        return False
+
+    if is_expanded:
+        # Contract: remove connected edges for the active mode and any orphaned nodes
+        remaining_edges = [
+            el
+            for el in elements
+            if "source" not in el.get("data", {}) or not matches_mode(el["data"])
+        ]
+
+        # Rebuild adjacency from remaining edges
+        connected_nodes = set()
+        for el in remaining_edges:
+            data = el.get("data", {})
+            if "source" in data:
+                connected_nodes.add(data.get("source"))
+                connected_nodes.add(data.get("target"))
+
+        contracted_elements = []
+        for el in remaining_edges:
+            data = el.get("data", {})
+            if "source" in data:
+                contracted_elements.append(el)
+                continue
+
+            nid = data.get("id")
+            if nid == node_id:
+                el["data"]["expanded"] = False
+                contracted_elements.append(el)
+                continue
+
+            # Keep the root document and any node still connected
+            if data.get("type") == "document" or nid in connected_nodes:
+                contracted_elements.append(el)
+
+        return contracted_elements
+
+    if tapped_element:
+        tapped_element["data"]["expanded"] = True
     for e in elements:
         if e.get("data", {}).get("id") == node_id:
             e["data"]["expanded"] = True

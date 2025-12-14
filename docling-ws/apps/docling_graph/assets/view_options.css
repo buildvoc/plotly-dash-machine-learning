@@ -1,5 +1,42 @@
-/* Minimal GraphCommons-style panel + dark UI */
+/* view_options.css
+   Adds "skeleton-lite" grid to match dash-cytoscape demo layout
+   while keeping your dark GraphCommons-style panel.
+*/
 
+/* ---------------------------
+   Skeleton-lite grid (demo compatibility)
+   The demo uses: <div class="eight columns"> / "four columns" / "row"
+----------------------------*/
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  width: 100%;
+  gap: 0;
+}
+
+.columns {
+  box-sizing: border-box;
+  padding: 0;
+  min-width: 0;
+}
+
+/* 12-col grid: 8/12 and 4/12 */
+.eight.columns { flex: 0 0 66.6666%; max-width: 66.6666%; }
+.four.columns  { flex: 0 0 33.3333%; max-width: 33.3333%; }
+
+/* Responsive: stack on small screens */
+@media (max-width: 980px) {
+  .eight.columns, .four.columns { flex: 0 0 100%; max-width: 100%; }
+}
+
+/* Add spacing so the right panel isn’t flush */
+.eight.columns { padding-right: 12px; }
+.four.columns  { padding-left: 12px; }
+
+/* ---------------------------
+   Your existing dark UI
+----------------------------*/
 .app {
   background: #0b0f17;
   color: #e5e7eb;
@@ -36,14 +73,12 @@
   cursor: pointer;
 }
 
-.btn:hover {
-  border-color: #334155;
-}
+.btn:hover { border-color: #334155; }
 
 .btn-primary {
-  background: #2563eb;
+  background: #7c3aed; /* purple accent to match demo vibe */
   color: white;
-  border: 1px solid #1d4ed8;
+  border: 1px solid #6d28d9;
   padding: 10px 12px;
   border-radius: 10px;
   cursor: pointer;
@@ -83,9 +118,7 @@
   overflow-y: auto;
 }
 
-.hidden {
-  display: none;
-}
+.hidden { display: none; }
 
 .panel-header {
   display: flex;
@@ -112,12 +145,6 @@
   font-weight: 600;
 }
 
-.row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
 .muted {
   opacity: 0.85;
   font-size: 12px;
@@ -127,4 +154,135 @@
   margin-top: 14px;
   border-top: 1px solid #1f2937;
   padding-top: 12px;
+}
+
+/* ---------------------------
+   Control panel (dark, inverted demo)
+----------------------------*/
+.control-tabs {
+  background: #0b0f17;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px #111827, 0 10px 30px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.control-tab {
+  background: #0b0f17;
+  color: #cbd5e1;
+  border: none;
+  padding: 0;
+}
+
+.control-tab--selected {
+  background: #0f172a !important;
+  border-bottom: 2px solid #7c3aed !important;
+  color: #e5e7eb !important;
+}
+
+.control-panel {
+  background: linear-gradient(135deg, #0f172a, #0b0f17);
+  border: 1px solid #111827;
+  border-radius: 12px;
+  padding: 14px 14px 18px;
+  color: #e5e7eb;
+  min-height: 80vh;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.45);
+}
+
+.control-panel--secondary {
+  min-height: unset;
+}
+
+.control-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.control-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.pill {
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  background: #111827;
+  border: 1px solid #1f2937;
+  color: #cbd5e1;
+}
+
+.pill--invert {
+  background: #c7d2fe;
+  color: #0b0f17;
+  border-color: #a5b4fc;
+}
+
+.control-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #111827;
+}
+
+.control-section--tight {
+  padding-top: 6px;
+}
+
+.control-label {
+  font-size: 12px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+
+.control-subtext {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #cbd5e1;
+  opacity: 0.85;
+}
+
+.Select-control,
+.Select-menu-outer {
+  background: #0f172a;
+  border-color: #1f2937;
+  color: #e5e7eb;
+}
+
+.control-panel .Select-value-label {
+  color: #e5e7eb !important;
+}
+
+.control-panel .rc-slider-track {
+  background-color: #7c3aed;
+}
+
+.control-panel .rc-slider-handle {
+  border-color: #7c3aed;
+  background-color: #0f172a;
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
+}
+
+.control-panel .rc-slider-rail {
+  background-color: #1f2937;
+}
+
+.control-panel .rc-slider-mark-text {
+  color: #94a3b8;
+}
+
+.control-radio,
+.control-checkbox {
+  accent-color: #7c3aed;
+  margin-right: 8px;
+}
+
+.control-radio__label,
+.control-checkbox__label {
+  color: #e5e7eb;
 }
