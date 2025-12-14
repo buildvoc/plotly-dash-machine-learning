@@ -37,9 +37,7 @@
     }
   }
 
-  function tryRegister() {
-    // cytoscape should be on window when dash-cytoscape is loaded
-    var cy = window.cytoscape;
+  function tryRegister(cy) {
     if (!cy) return false;
 
     // Common globals used by the plugin build
@@ -59,14 +57,29 @@
     return registerFallback(cy);
   }
 
-  // Try immediately, then retry a few times in case scripts load in a different order.
+  // Try immediately, then retry in case scripts load in a different order.
+  // We do not count attempts until cytoscape is available to avoid exiting
+  // before dash-cytoscape finishes loading.
   var attempts = 0;
+  var maxAttempts = 240; // ~60s at 250ms interval
   var timer = setInterval(function () {
+    var cy = window.cytoscape;
+
+    if (!cy) {
+      return;
+    }
+
     attempts += 1;
-    if (tryRegister() || attempts >= 20) {
+
+    if (tryRegister(cy)) {
       clearInterval(timer);
-      if (attempts >= 20 && !registeredFallback) {
-        registerFallback(window.cytoscape);
+      return;
+    }
+
+    if (attempts >= maxAttempts) {
+      clearInterval(timer);
+      if (!registeredFallback) {
+        registerFallback(cy);
       }
     }
   }, 250);
