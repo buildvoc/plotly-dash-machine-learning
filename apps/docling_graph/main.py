@@ -533,6 +533,9 @@ def expand_on_click(node_data, elements, store_graph, node_index, mode, page_ran
 
     if tapped_element:
         tapped_element["data"]["expanded"] = True
+    for e in elements:
+        if e.get("data", {}).get("id") == node_id:
+            e["data"]["expanded"] = True
 
     new_nodes = []
     new_edges = []
