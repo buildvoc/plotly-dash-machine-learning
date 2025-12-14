@@ -3,7 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
+import unittest
+from collections.abc import Iterable
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
 DEFAULT_JSON_ROOT = os.path.join(REPO_ROOT, "data", "docling")
@@ -38,6 +44,18 @@ SKIP_TEXT_LABELS = {
 }
 
 
+# -----------------------------
+# Graph contract
+# -----------------------------
+@dataclass(frozen=True)
+class GraphPayload:
+    nodes: List[Dict[str, Any]]
+    edges: List[Dict[str, Any]]
+
+
+# -----------------------------
+# Helpers
+# -----------------------------
 def _nid(value: str) -> str:
     return "n_" + hashlib.md5(value.encode("utf-8")).hexdigest()[:12]
 
@@ -61,9 +79,11 @@ def _short(text: str, limit: int = 120) -> str:
     return t[:limit] + ("…" if len(t) > limit else "")
 
 
-def list_docling_files() -> List[str]:
+def list_docling_files(json_root: Optional[str] = None) -> List[str]:
     results: List[str] = []
-    for root, _, files in os.walk(DOCLING_JSON_ROOT):
+    search_root = json_root or DOCLING_JSON_ROOT
+
+    for root, _, files in os.walk(search_root):
         for name in files:
             if name.lower().endswith(".json"):
                 results.append(os.path.join(root, name))
@@ -83,39 +103,15 @@ def _is_noise_text(label: str, text: str) -> bool:
     return False
 
 
-def build_graph_from_docling_json(path: str) -> List[Dict[str, Any]]:
-    """
-    Graph:
-        DOCUMENT → PAGE → TEXT
-
-    Stores BOTH:
-      - label_short (for compact layouts like Dagre)
-      - label_full  (for reading layouts like Cola)
-    """
-    doc = _load_json(path)
-    elements: List[Dict[str, Any]] = []
-
-    doc_id = _nid(path)
-    doc_name = os.path.basename(path)
-
-    elements.append(
-        {
-            "data": {
-                "id": doc_id,
-                "type": "document",
-                "label_short": f"DOCUMENT: {doc_name}",
-                "label_full": f"DOCUMENT: {doc_name}",
-                "label": f"DOCUMENT: {doc_name}",
-            },
-            "classes": "document",
-        }
-    )
-
-    texts = doc.get("texts")
-    if not isinstance(texts, list):
-        return elements
-
+# -----------------------------
+# Core builder
+# -----------------------------
+def _collect_pages_from_texts(texts: Iterable[Any]) -> Dict[int, List[Dict[str, Any]]]:
     pages: Dict[int, List[Dict[str, Any]]] = {}
+
+    if not isinstance(texts, Iterable):
+        return pages
+
     for t in texts:
         if not isinstance(t, dict):
             continue
@@ -132,10 +128,46 @@ def build_graph_from_docling_json(path: str) -> List[Dict[str, Any]]:
 
         pages.setdefault(page_no, []).append(t)
 
+    return pages
+
+
+def build_graph_from_docling_json(path: str) -> GraphPayload:
+    """
+    Graph shape:
+        DOCUMENT → PAGE → TEXT
+
+    Nodes and edges are returned separately
+    for Cytoscape stability and incremental expansion.
+    """
+    doc = _load_json(path)
+
+    nodes: List[Dict[str, Any]] = []
+    edges: List[Dict[str, Any]] = []
+
+    doc_id = _nid(path)
+    doc_name = os.path.basename(path)
+
+    # DOCUMENT node
+    nodes.append(
+        {
+            "data": {
+                "id": doc_id,
+                "type": "document",
+                "label_short": f"DOCUMENT: {doc_name}",
+                "label_full": f"DOCUMENT: {doc_name}",
+                "label": f"DOCUMENT: {doc_name}",
+            },
+            "classes": "document",
+        }
+    )
+
+    pages = _collect_pages_from_texts(doc.get("texts"))
+
+    # PAGE + TEXT nodes
     for page_no in sorted(pages.keys()):
         page_id = _nid(f"{path}::page::{page_no}")
 
-        elements.append(
+        nodes.append(
             {
                 "data": {
                     "id": page_id,
@@ -149,17 +181,23 @@ def build_graph_from_docling_json(path: str) -> List[Dict[str, Any]]:
             }
         )
 
-        elements.append({"data": {"source": doc_id, "target": page_id}, "classes": "hier"})
+        edges.append(
+            {
+                "data": {
+                    "id": _nid(f"{doc_id}__{page_id}"),
+                    "source": doc_id,
+                    "target": page_id,
+                    "rel": "hier",
+                    "weight": 3,
+                },
+                "classes": "hier",
+            }
+        )
 
-        page_texts = pages[page_no]
-        if MAX_TEXTS_PER_PAGE is not None:
-            page_texts = page_texts[:MAX_TEXTS_PER_PAGE]
+        page_texts = pages[page_no][:MAX_TEXTS_PER_PAGE]
 
         for t in page_texts:
-            ref = t.get("self_ref") or t.get("id")
-            if not isinstance(ref, str):
-                ref = f"{path}::p{page_no}::{hashlib.md5(str(t).encode()).hexdigest()}"
-
+            ref = t.get("self_ref") or t.get("id") or repr(t)
             text_id = _nid(ref)
 
             raw_text = str(t.get("text") or "")
@@ -170,7 +208,7 @@ def build_graph_from_docling_json(path: str) -> List[Dict[str, Any]]:
             label_full = f"{dtype}: {raw_text}"
             label_short = f"{dtype}: {_short(raw_text, 140)}"
 
-            elements.append(
+            nodes.append(
                 {
                     "data": {
                         "id": text_id,
@@ -187,6 +225,96 @@ def build_graph_from_docling_json(path: str) -> List[Dict[str, Any]]:
                 }
             )
 
-            elements.append({"data": {"source": page_id, "target": text_id}, "classes": "hier"})
+            edges.append(
+                {
+                    "data": {
+                        "id": _nid(f"{page_id}__{text_id}"),
+                        "source": page_id,
+                        "target": text_id,
+                        "rel": "hier",
+                        "weight": 1,
+                    },
+                    "classes": "hier",
+                }
+            )
 
-    return elements
+    return GraphPayload(nodes=nodes, edges=edges)
+
+
+# -----------------------------
+# Tests
+# -----------------------------
+
+
+class GraphBuilderTests(unittest.TestCase):
+    def test_is_noise_text_filters_short_or_skipped_labels(self):
+        self.assertTrue(_is_noise_text("body", "too short"))
+        self.assertTrue(_is_noise_text("header", "x" * (MIN_TEXT_LEN + 5)))
+        self.assertFalse(_is_noise_text("body", "x" * (MIN_TEXT_LEN + 5)))
+
+    def test_collect_pages_from_texts_filters_invalid_entries(self):
+        long_text = "content " * 10
+        pages = _collect_pages_from_texts(
+            [
+                {"label": "body", "text": long_text, "prov": [{"page_no": 2}]},
+                {"label": "header", "text": long_text, "prov": [{"page_no": 3}]},
+                {"label": "body", "text": "", "prov": [{"page_no": 4}]},
+                "not a dict",
+                {"label": "body", "text": long_text},
+            ]
+        )
+
+        self.assertEqual(sorted(pages.keys()), [2])
+        self.assertEqual(len(pages[2]), 1)
+
+    def test_build_graph_from_docling_json_emits_document_page_and_text(self):
+        doc = {
+            "texts": [
+                {
+                    "label": "body",
+                    "text": "paragraph " * 10,
+                    "prov": [{"page_no": 1, "bbox": [0, 0, 10, 10]}],
+                }
+            ]
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
+            json.dump(doc, tmp)
+            tmp_path = tmp.name
+
+        try:
+            payload = build_graph_from_docling_json(tmp_path)
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+        self.assertEqual(len(payload.nodes), 3)
+        self.assertEqual(len(payload.edges), 2)
+
+        node_ids = {n["data"]["id"] for n in payload.nodes}
+        edge_pairs = {(e["data"]["source"], e["data"]["target"]) for e in payload.edges}
+
+        doc_id = _nid(tmp_path)
+        page_id = _nid(f"{tmp_path}::page::1")
+        text_id = next(n["data"]["id"] for n in payload.nodes if n["data"]["type"] == "text")
+
+        self.assertIn(doc_id, node_ids)
+        self.assertIn(page_id, node_ids)
+        self.assertEqual(edge_pairs, {(doc_id, page_id), (page_id, text_id)})
+
+    def test_list_docling_files_accepts_custom_root(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            nested = Path(tmpdir) / "nested"
+            nested.mkdir()
+
+            first = nested / "a.json"
+            second = nested / "B.JSON"
+            first.write_text("{}", encoding="utf-8")
+            second.write_text("{}", encoding="utf-8")
+
+            results = list_docling_files(str(tmpdir))
+
+        self.assertEqual(results, sorted([str(first), str(second)]))
+
+
+if __name__ == "__main__":
+    unittest.main()

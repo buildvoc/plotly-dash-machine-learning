@@ -1,7 +1,38 @@
-:root { color-scheme: dark; }
-html, body { background:#111; color:#eee; }
-.Select-control, .Select-menu-outer, .Select-option { background:#1b1b1b !important; color:#eee !important; }
-.Select-option.is-focused { background:#2a2a2a !important; }
-.rc-slider-rail { background:#2a2a2a; }
-.rc-slider-track { background:#5bb7ff; }
-.cy-container, #network-graph { background:#111 !important; }
+html, body {
+  background: #121212;
+  color: #eaeaea;
+}
+
+.app-root {
+  display: flex;
+  background: #121212;
+}
+
+.sidebar {
+  width: 340px;
+  background: #1b1b1b;
+  padding: 12px;
+  border-right: 1px solid #333;
+}
+
+label {
+  color: #ccc;
+}
+
+.Select-control,
+.Select-menu-outer {
+  background: #222;
+  color: #fff;
+}
+
+.rc-slider-track {
+  background-color: #9b4dff;
+}
+
+.rc-slider-handle {
+  border-color: #9b4dff;
+}
+
+.rc-slider-rail {
+  background-color: #333;
+}
