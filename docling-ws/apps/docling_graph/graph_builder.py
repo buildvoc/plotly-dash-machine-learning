@@ -7,7 +7,20 @@ from typing import Any, Dict, List, Optional, Tuple
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
 DEFAULT_JSON_ROOT = os.path.join(REPO_ROOT, "data", "docling")
-DOCLING_JSON_ROOT = os.environ.get("DOCLING_JSON_ROOT", DEFAULT_JSON_ROOT)
+
+
+def _docling_json_root() -> str:
+    override = os.environ.get("DOCLING_JSON_ROOT")
+    if not override:
+        return DEFAULT_JSON_ROOT
+
+    if not os.path.isabs(override):
+        return os.path.abspath(os.path.join(REPO_ROOT, override))
+
+    return override
+
+
+DOCLING_JSON_ROOT = _docling_json_root()
 
 MIN_TEXT_LEN = 40
 MAX_TEXTS_PER_PAGE = 250
