@@ -224,7 +224,7 @@ app.layout = html.Div(
         cyto.Cytoscape(
             id="graph",
             style={"width": "100%", "height": "85vh"},
-            wheelSensitivity=0.01,
+            wheelSensitivity=1,
             minZoom=0.25,
             maxZoom=2.0,
             layout=_layout_for(DEFAULT_VIEW["layout"], DEFAULT_VIEW["scaling_ratio"]),

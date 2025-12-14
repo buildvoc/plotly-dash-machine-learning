@@ -5,6 +5,38 @@
 // This init runs in the browser (Dash assets pipeline).
 
 (function () {
+  var registeredFallback = false;
+
+  function registerFallback(cy) {
+    if (registeredFallback || !cy || typeof cy.use !== "function") return;
+
+    // Lightweight shim to avoid layout failures when the ForceAtlas2 plugin is missing.
+    // Maps ForceAtlas2 configuration to the built-in COSE layout so that selecting
+    // ForceAtlas2 still yields a working force-directed layout.
+    function forceAtlas2Shim(cytoscape) {
+      if (!cytoscape) return;
+
+      cytoscape(
+        "layout",
+        "forceatlas2",
+        function (options) {
+          var fallbackOptions = Object.assign({}, options, { name: "cose" });
+          return cytoscape.layouts(fallbackOptions);
+        }
+      );
+    }
+
+    try {
+      cy.use(forceAtlas2Shim);
+      console.info("[docling_graph] ForceAtlas2 plugin not detected; using COSE fallback");
+      registeredFallback = true;
+      return true;
+    } catch (e) {
+      console.warn("[docling_graph] Failed to register ForceAtlas2 fallback", e);
+      return false;
+    }
+  }
+
   function tryRegister() {
     // cytoscape should be on window when dash-cytoscape is loaded
     var cy = window.cytoscape;
@@ -23,7 +55,8 @@
         console.warn("[docling_graph] ForceAtlas2 plugin present but failed to register", e);
       }
     }
-    return false;
+
+    return registerFallback(cy);
   }
 
   // Try immediately, then retry a few times in case scripts load in a different order.
@@ -32,8 +65,8 @@
     attempts += 1;
     if (tryRegister() || attempts >= 20) {
       clearInterval(timer);
-      if (attempts >= 20) {
-        console.warn("[docling_graph] ForceAtlas2 plugin not detected (layout will fail if selected)");
+      if (attempts >= 20 && !registeredFallback) {
+        registerFallback(window.cytoscape);
       }
     }
   }, 250);
