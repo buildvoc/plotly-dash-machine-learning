@@ -10,7 +10,8 @@ DEFAULT_JSON_ROOT = os.path.join(REPO_ROOT, "data", "docling")
 
 
 def _docling_json_root() -> str:
-    override = os.environ.get("DOCLING_JSON_ROOT")
+    override_raw = os.environ.get("DOCLING_JSON_ROOT")
+    override = os.path.expanduser(os.path.expandvars(override_raw or ""))
     if not override:
         return DEFAULT_JSON_ROOT
 
