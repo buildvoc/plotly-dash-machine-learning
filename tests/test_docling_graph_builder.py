@@ -16,12 +16,8 @@ SMALL_FIXTURE = FIXTURES_ROOT / "regulations" / "uksi-2010-2214-regulation-38.js
 class DoclingGraphBuilderFixtureTests(unittest.TestCase):
     def test_candidate_roots_include_hp_workspace_path(self):
         hp_root = os.path.abspath("/home/hp/docling-ws/docling-ws/data/docling")
-        hp_building = os.path.join(hp_root, "building_standards")
-        hp_regulations = os.path.join(hp_root, "regulations")
 
         self.assertIn(hp_root, gb._candidate_json_roots())
-        self.assertIn(hp_building, gb._candidate_json_roots())
-        self.assertIn(hp_regulations, gb._candidate_json_roots())
 
     def test_discovery_finds_fixture_jsons(self):
         building_files = gb.list_docling_files(str(FIXTURES_ROOT / "building_standards"))
@@ -115,7 +111,7 @@ class DoclingGraphBuilderFixtureTests(unittest.TestCase):
         self.assertIn(("#/pictures/0", "#/texts/1", "captions"), edges)
         self.assertTrue(any(e[2] == "document" for e in edges))
 
-    def test_list_docling_files_is_recursive(self):
+    def test_list_docling_files_is_non_recursive(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             top_level = root / "root.json"
@@ -128,15 +124,7 @@ class DoclingGraphBuilderFixtureTests(unittest.TestCase):
 
             results = gb.list_docling_files(tmpdir)
 
-        self.assertEqual(results, [str(nested), str(top_level)])
-
-    def test_list_docling_files_recurses_over_fixture_tree(self):
-        results = gb.list_docling_files(str(FIXTURES_ROOT))
-
-        names = [Path(p).name for p in results]
-
-        self.assertIn("2025_Amendments_to_Approved_Document_B_volume_1_and_volume_2.json", names)
-        self.assertIn("uksi-2010-2214-regulation-38.json", names)
+        self.assertEqual(results, [str(top_level)])
 
     def test_list_docling_files_sorted_by_filename(self):
         with tempfile.TemporaryDirectory() as tmpdir:

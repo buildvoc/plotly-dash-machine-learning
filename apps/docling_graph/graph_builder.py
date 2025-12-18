@@ -21,16 +21,7 @@ def _candidate_json_roots() -> List[str]:
     sibling_workspace = os.path.abspath(os.path.join(REPO_ROOT, "docling-ws", "data", "docling"))
     parent_workspace = os.path.abspath(os.path.join(REPO_ROOT, os.pardir, "docling-ws", "data", "docling"))
     hp_workspace = os.path.abspath("/home/hp/docling-ws/docling-ws/data/docling")
-    hp_building = os.path.join(hp_workspace, "building_standards")
-    hp_regulations = os.path.join(hp_workspace, "regulations")
-    return [
-        DEFAULT_JSON_ROOT,
-        sibling_workspace,
-        parent_workspace,
-        hp_workspace,
-        hp_building,
-        hp_regulations,
-    ]
+    return [DEFAULT_JSON_ROOT, sibling_workspace, parent_workspace, hp_workspace]
 
 
 def _docling_docs_root() -> str:
@@ -120,11 +111,11 @@ def list_docling_files(json_root: Optional[str] = None) -> List[str]:
     if not search_root.is_dir():
         return results
 
-    for candidate in search_root.rglob("*"):
+    for candidate in search_root.iterdir():
         if candidate.is_file() and candidate.suffix.lower() == ".json":
             results.append(str(candidate))
 
-    return sorted(results, key=lambda p: (Path(p).name.lower(), str(Path(p))))
+    return sorted(results, key=lambda p: Path(p).name.lower())
 
 
 def _is_noise_text(label: str, text: str) -> bool:
