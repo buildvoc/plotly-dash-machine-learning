@@ -497,17 +497,21 @@ def show_page_range(value):
     prevent_initial_call=True,
 )
 def expand_on_click(node_data, elements, store_graph, node_index, mode, page_range):
-    if not node_data or not store_graph or not page_range:
+    if not node_data or not store_graph:
         return no_update
 
     node_id = node_data.get("id")
     if not node_id:
         return no_update
 
-    start_page, end_page = page_range
+    start_page, end_page = (page_range or (None, None))
 
     def in_range(page):
-        return page is None or (start_page <= page <= end_page)
+        if page is None:
+            return True
+        if start_page is None or end_page is None:
+            return True
+        return start_page <= page <= end_page
 
     existing_nodes = {e["data"]["id"] for e in elements if "id" in e.get("data", {})}
     existing_edges = {e["data"]["id"] for e in elements if "source" in e.get("data", {})}
