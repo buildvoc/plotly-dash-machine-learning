@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import json
+from pathlib import Path
 from dash import Dash, html, dcc, Input, Output, State, no_update
 import dash_cytoscape as cyto
 
@@ -35,6 +37,22 @@ def pages_from_nodes(nodes):
             if n.get("data", {}).get("page") is not None
         }
     )
+
+
+def _source_label(path: str) -> str:
+    if not path:
+        return "No document selected"
+
+    name = os.path.basename(path)
+    try:
+        digest = hashlib.md5(Path(path).read_bytes()).hexdigest()[:12]
+        return f"{name} · {digest}"
+    except OSError:
+        return name
+
+
+def _graph_stats(graph: GraphPayload) -> str:
+    return f"{len(graph.nodes)} nodes · {len(graph.edges)} edges"
 
 
 # -------------------------------------------------
@@ -283,6 +301,14 @@ app.layout = html.Div(
                                                             value=(files[0] if files else None),
                                                             clearable=False,
                                                         ),
+                                                        html.Div(
+                                                            id="data_source_label",
+                                                            className="control-subtext",
+                                                        ),
+                                                        html.Div(
+                                                            id="graph_counts",
+                                                            className="control-subtext",
+                                                        ),
                                                     ],
                                                 ),
                                                 html.Div(
@@ -400,13 +426,18 @@ app.layout = html.Div(
     Output("graph", "elements"),
     Output("store_graph", "data"),
     Output("store_node_index", "data"),
+    Output("data_source_label", "children"),
+    Output("graph_counts", "children"),
     Input("file", "value"),
 )
 def load_graph(path):
     if not path:
-        return [], None, None
+        return [], None, None, "No document selected", ""
 
-    g = build_graph_from_docling_json(path)
+    try:
+        g = build_graph_from_docling_json(path)
+    except ValueError as exc:
+        return [], None, None, f"Error: {exc}", ""
 
     node_index = {n["data"]["id"]: n for n in g.nodes if n.get("data", {}).get("id")}
 
@@ -416,7 +447,7 @@ def load_graph(path):
 
     store_graph = {"nodes": g.nodes, "edges": g.edges}
 
-    return elements, store_graph, node_index
+    return elements, store_graph, node_index, _source_label(path), _graph_stats(g)
 
 
 @app.callback(
@@ -430,7 +461,11 @@ def init_page_range(path):
     if not path:
         return 1, 1, [1, 1], {}
 
-    g = build_graph_from_docling_json(path)
+    try:
+        g = build_graph_from_docling_json(path)
+    except ValueError:
+        return 1, 1, [1, 1], {}
+
     pages = pages_from_nodes(g.nodes)
     if not pages:
         return 1, 1, [1, 1], {}
@@ -533,9 +568,6 @@ def expand_on_click(node_data, elements, store_graph, node_index, mode, page_ran
 
     if tapped_element:
         tapped_element["data"]["expanded"] = True
-    for e in elements:
-        if e.get("data", {}).get("id") == node_id:
-            e["data"]["expanded"] = True
 
     new_nodes = []
     new_edges = []
