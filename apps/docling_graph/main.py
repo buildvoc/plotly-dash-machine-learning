@@ -3,12 +3,15 @@ from __future__ import annotations
 import hashlib
 import os
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from dash import Dash, html, dcc, Input, Output, State, no_update
 import dash_cytoscape as cyto
+from flask import Response
 
 from .graph_builder import (
     build_graph_from_docling_json,
+    docling_docs_root,
     list_docling_files,
     GraphPayload,
 )
@@ -205,8 +208,6 @@ def base_stylesheet(node_size, font_size, text_max_width, show_edge_labels):
 # -------------------------------------------------
 # App + Defaults
 # -------------------------------------------------
-files = list_docling_files()
-
 DEFAULT_VIEW = {
     "layout": "dagre",
     "scaling_ratio": 250,
@@ -231,6 +232,7 @@ app.layout = html.Div(
     children=[
         dcc.Store(id="store_graph"),
         dcc.Store(id="store_node_index"),
+        dcc.Interval(id="docs_refresh", interval=500, n_intervals=0, max_intervals=1),
 
         html.Div(
             className="row",
@@ -297,12 +299,16 @@ app.layout = html.Div(
                                                         html.Div("Document", className="control-label"),
                                                         dcc.Dropdown(
                                                             id="file",
-                                                            options=[{"label": f, "value": f} for f in files],
-                                                            value=(files[0] if files else None),
+                                                            options=[],
+                                                            value=None,
                                                             clearable=False,
                                                         ),
                                                         html.Div(
                                                             id="data_source_label",
+                                                            className="control-subtext",
+                                                        ),
+                                                        html.Div(
+                                                            id="doc_scan_info",
                                                             className="control-subtext",
                                                         ),
                                                         html.Div(
@@ -422,6 +428,38 @@ app.layout = html.Div(
 # -------------------------------------------------
 # Callbacks
 # -------------------------------------------------
+@server.route("/api/documents")
+def list_documents_api():
+    scan_root = docling_docs_root()
+    payload = {"documents": list_docling_files(scan_root), "scan_root": scan_root}
+    response = Response(json.dumps(payload), mimetype="application/json")
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.callback(
+    Output("file", "options"),
+    Output("file", "value"),
+    Output("doc_scan_info", "children"),
+    Input("docs_refresh", "n_intervals"),
+    State("file", "value"),
+)
+def refresh_document_options(_n_intervals, current_value):
+    scan_root = docling_docs_root()
+    doc_paths = list_docling_files(scan_root)
+    options = [{"label": Path(path).name, "value": path} for path in doc_paths]
+    value = current_value if current_value in doc_paths else (doc_paths[0] if doc_paths else None)
+    scanned_at = datetime.now(timezone.utc).isoformat()
+
+    scan_info = [
+        html.Div(f"Scan root: {scan_root}"),
+        html.Div(f"Found: {len(doc_paths)}"),
+        html.Div(f"Last scan: {scanned_at}"),
+    ]
+
+    return options, value, scan_info
+
+
 @app.callback(
     Output("graph", "elements"),
     Output("store_graph", "data"),

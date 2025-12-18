@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 import types
 from pathlib import Path
@@ -26,6 +27,17 @@ def _install_dash_stubs():
             def __getattr__(self, _name):
                 return _Element
 
+        class _Server:
+            def __init__(self):
+                self.routes = {}
+
+            def route(self, path, **_kwargs):
+                def decorator(func):
+                    self.routes[path] = func
+                    return func
+
+                return decorator
+
         class _IO:
             def __init__(self, *args, **kwargs):
                 self.args = args
@@ -33,7 +45,7 @@ def _install_dash_stubs():
 
         class Dash:
             def __init__(self, *args, **kwargs):
-                self.server = None
+                self.server = _Server()
 
             def callback(self, *args, **kwargs):
                 def decorator(func):
@@ -60,6 +72,24 @@ def _install_dash_stubs():
         dash_cytoscape_stub.Cytoscape = dash_stub.html.__getattr__("cytoscape")  # type: ignore[arg-type]
         dash_cytoscape_stub.load_extra_layouts = lambda: None
         sys.modules["dash_cytoscape"] = dash_cytoscape_stub
+
+    if "flask" not in sys.modules:
+        flask_stub = types.ModuleType("flask")
+
+        class Response:
+            def __init__(self, data=None, mimetype=None):
+                self.data = data or ""
+                self.mimetype = mimetype
+                self.headers = {}
+
+            def get_json(self):
+                try:
+                    return json.loads(self.data)
+                except Exception:
+                    return None
+
+        flask_stub.Response = Response
+        sys.modules["flask"] = flask_stub
 
     return sys.modules["dash"].no_update  # type: ignore[attr-defined]
 
