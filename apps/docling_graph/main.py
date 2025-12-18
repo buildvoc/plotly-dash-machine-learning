@@ -572,7 +572,7 @@ def expand_on_click(node_data, elements, store_graph, node_index, mode, page_ran
         d = ed["data"]
         src, tgt, rel = d.get("source"), d.get("target"), d.get("rel")
 
-        if mode == "children" and not (rel == "hier" and src == node_id):
+        if mode == "children" and not (src == node_id or tgt == node_id):
             continue
         if mode == "out" and src != node_id:
             continue
