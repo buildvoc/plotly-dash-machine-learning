@@ -417,6 +417,21 @@ app.layout = html.Div(
         ),
     ]
 )
+def load_graph(path):
+    if not path:
+        return [], None, None
+
+    g = build_graph_from_docling_json(path)
+
+    node_index = {n["data"]["id"]: n for n in g.nodes if n.get("data", {}).get("id")}
+
+    # Genesis node: document
+    doc_node = next((n for n in g.nodes if n["data"].get("type") == "document"), None)
+    elements = [doc_node] if doc_node else []
+
+    store_graph = {"nodes": g.nodes, "edges": g.edges}
+
+    return elements, store_graph, node_index
 
 
 # -------------------------------------------------
