@@ -20,7 +20,8 @@ def _candidate_json_roots() -> List[str]:
     """Return potential JSON roots, preferring repo data then workspace copy."""
     sibling_workspace = os.path.abspath(os.path.join(REPO_ROOT, "docling-ws", "data", "docling"))
     parent_workspace = os.path.abspath(os.path.join(REPO_ROOT, os.pardir, "docling-ws", "data", "docling"))
-    return [DEFAULT_JSON_ROOT, sibling_workspace, parent_workspace]
+    hp_workspace = os.path.abspath("/home/hp/docling-ws/docling-ws/data/docling")
+    return [DEFAULT_JSON_ROOT, sibling_workspace, parent_workspace, hp_workspace]
 
 
 def _docling_docs_root() -> str:

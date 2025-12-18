@@ -14,6 +14,11 @@ SMALL_FIXTURE = FIXTURES_ROOT / "regulations" / "uksi-2010-2214-regulation-38.js
 
 
 class DoclingGraphBuilderFixtureTests(unittest.TestCase):
+    def test_candidate_roots_include_hp_workspace_path(self):
+        hp_root = os.path.abspath("/home/hp/docling-ws/docling-ws/data/docling")
+
+        self.assertIn(hp_root, gb._candidate_json_roots())
+
     def test_discovery_finds_fixture_jsons(self):
         building_files = gb.list_docling_files(str(FIXTURES_ROOT / "building_standards"))
         regulation_files = gb.list_docling_files(str(FIXTURES_ROOT / "regulations"))
