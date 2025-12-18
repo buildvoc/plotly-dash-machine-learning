@@ -501,6 +501,8 @@ def expand_on_click(node_data, elements, store_graph, node_index, mode, page_ran
         return no_update
 
     elements = elements or []
+    store_edges = store_graph.get("edges") or []
+    node_index = node_index or {}
 
     node_id = node_data.get("id")
     if not node_id:
@@ -574,7 +576,7 @@ def expand_on_click(node_data, elements, store_graph, node_index, mode, page_ran
     new_nodes = []
     new_edges = []
 
-    for ed in store_graph["edges"]:
+    for ed in store_edges:
         d = ed["data"]
         src, tgt, rel = d.get("source"), d.get("target"), d.get("rel")
 
