@@ -270,6 +270,31 @@ def _build_hierarchy_edges(items: Dict[str, Dict[str, Any]], allowed_refs: Set[s
 # -----------------------------
 # Core builder
 # -----------------------------
+def _collect_pages_from_texts(texts: Iterable[Any]) -> Dict[int, List[Dict[str, Any]]]:
+    pages: Dict[int, List[Dict[str, Any]]] = {}
+
+    if not isinstance(texts, Iterable):
+        return pages
+
+    for t in texts:
+        if not isinstance(t, dict):
+            continue
+
+        raw_label = str(t.get("label") or "text")
+        raw_text = str(t.get("text") or "")
+
+        if _is_noise_text(raw_label, raw_text):
+            continue
+
+        page_no, _ = _first_prov(t)
+        if page_no is None:
+            continue
+
+        pages.setdefault(page_no, []).append(t)
+
+    return pages
+
+
 def build_graph_from_docling_json(path: str) -> GraphPayload:
     """
     Graph shape:
