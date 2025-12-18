@@ -537,7 +537,7 @@ def expand_on_click(node_data, elements, store_graph, node_index, mode, page_ran
         src, tgt = edge_data.get("source"), edge_data.get("target")
 
         if mode == "children":
-            return src == node_id
+            return src == node_id or tgt == node_id
         if mode == "out":
             return src == node_id
         if mode == "in":
