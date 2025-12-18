@@ -23,8 +23,8 @@ def _candidate_json_roots() -> List[str]:
     return [DEFAULT_JSON_ROOT, sibling_workspace, parent_workspace]
 
 
-def _docling_json_root() -> str:
-    override = os.environ.get("DOCLING_JSON_ROOT")
+def _docling_docs_root() -> str:
+    override = os.environ.get("DOCLING_DOCS_DIR") or os.environ.get("DOCLING_JSON_ROOT")
     if override:
         return (
             os.path.abspath(os.path.join(REPO_ROOT, override))
@@ -39,7 +39,12 @@ def _docling_json_root() -> str:
     return DEFAULT_JSON_ROOT
 
 
-DOCLING_JSON_ROOT = _docling_json_root()
+DOCLING_DOCS_DIR = _docling_docs_root()
+print(f"[docling_graph] Using documents directory: {DOCLING_DOCS_DIR}")
+
+
+def docling_docs_root() -> str:
+    return _docling_docs_root()
 
 MIN_TEXT_LEN = 40
 MAX_TEXTS_PER_PAGE = 250
@@ -100,16 +105,16 @@ def _short(text: str, limit: int = 120) -> str:
 
 def list_docling_files(json_root: Optional[str] = None) -> List[str]:
     results: List[str] = []
-    search_root = json_root or _docling_json_root()
+    search_root = Path(json_root or docling_docs_root())
 
-    if not os.path.isdir(search_root):
+    if not search_root.is_dir():
         return results
 
-    for root, _, files in os.walk(search_root):
-        for name in files:
-            if name.lower().endswith(".json"):
-                results.append(os.path.join(root, name))
-    return sorted(results)
+    for candidate in search_root.rglob("*"):
+        if candidate.is_file() and candidate.suffix.lower() == ".json":
+            results.append(str(candidate))
+
+    return sorted(results, key=lambda p: (Path(p).name.lower(), str(Path(p))))
 
 
 def _is_noise_text(label: str, text: str) -> bool:
