@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
 DEFAULT_JSON_ROOT = os.path.join(REPO_ROOT, "data", "docling")
@@ -77,21 +77,65 @@ def _is_noise_text(label: str, text: str) -> bool:
 
     if not t:
         return True
-    if MIN_TEXT_LEN is not None and len(t) < MIN_TEXT_LEN:
+    if MIN_TEXT_LEN is not None and len(t) < MIN_TEXT_LEN and lbl != "section_header":
         return True
     if lbl in SKIP_TEXT_LABELS:
         return True
     return False
 
 
+def _ref_from(value: Any) -> Optional[str]:
+    if isinstance(value, dict):
+        ref = value.get("$ref")
+        if isinstance(ref, str):
+            return ref
+    return None
+
+
+def _index_items(doc: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    by_ref: Dict[str, Dict[str, Any]] = {}
+
+    def add(obj: Dict[str, Any]):
+        ref = obj.get("self_ref")
+        if isinstance(ref, str):
+            by_ref[ref] = obj
+
+    for value in doc.values():
+        if isinstance(value, dict) and "self_ref" in value:
+            add(value)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict) and "self_ref" in item:
+                    add(item)
+
+    return by_ref
+
+
+def _iter_child_refs(item: Dict[str, Any]):
+    for key, value in item.items():
+        if key in {"parent", "self_ref"}:
+            continue
+
+        if isinstance(value, list):
+            for v in value:
+                ref = _ref_from(v)
+                if ref:
+                    yield ref
+        else:
+            ref = _ref_from(value)
+            if ref:
+                yield ref
+
+
 def build_graph_from_docling_json(path: str) -> List[Dict[str, Any]]:
     """
     Graph:
-        DOCUMENT → PAGE → TEXT
+        DOCUMENT → BODY (and furniture) → DOCSTRUCT items → leaf items
 
-    Stores BOTH:
-      - label_short (for compact layouts like Dagre)
-      - label_full  (for reading layouts like Cola)
+    Traverses the Docling hierarchy using $ref links, creating nodes for any
+    referenced item (groups, texts, pictures, tables, etc.) while preserving
+    provenance such as page numbers and content layers. Text nodes still carry
+    short + full labels for layout switching.
     """
     doc = _load_json(path)
     elements: List[Dict[str, Any]] = []
@@ -103,7 +147,7 @@ def build_graph_from_docling_json(path: str) -> List[Dict[str, Any]]:
         {
             "data": {
                 "id": doc_id,
-                "type": "document",
+                "type": "DOCUMENT",
                 "label_short": f"DOCUMENT: {doc_name}",
                 "label_full": f"DOCUMENT: {doc_name}",
                 "label": f"DOCUMENT: {doc_name}",
@@ -112,82 +156,88 @@ def build_graph_from_docling_json(path: str) -> List[Dict[str, Any]]:
         }
     )
 
-    texts = doc.get("texts")
-    if not isinstance(texts, list):
-        return elements
+    by_ref = _index_items(doc)
+    visited: Dict[str, Optional[str]] = {}
+    page_counts: Dict[int, int] = {}
+    edges_seen: Set[Tuple[str, str]] = set()
 
-    pages: Dict[int, List[Dict[str, Any]]] = {}
-    for t in texts:
-        if not isinstance(t, dict):
+    def make_node(ref: str, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        label_raw = str(item.get("label") or item.get("name") or "item")
+        type_val = label_raw.upper()
+        text_val = item.get("text")
+        content_layer = item.get("content_layer")
+        page_no, bbox = _first_prov(item)
+
+        if isinstance(text_val, str):
+            if _is_noise_text(label_raw, text_val):
+                return None
+
+            if page_no is not None:
+                if MAX_TEXTS_PER_PAGE is not None and page_counts.get(page_no, 0) >= MAX_TEXTS_PER_PAGE:
+                    return None
+                page_counts[page_no] = page_counts.get(page_no, 0) + 1
+
+            label_full = f"{type_val}: {text_val}"
+            label_short = f"{type_val}: {_short(text_val, 140)}"
+        else:
+            label_full = label_raw
+            label_short = label_raw
+
+        data = {
+            "id": _nid(ref),
+            "type": type_val,
+            "label_short": label_short,
+            "label_full": label_full,
+            "label": label_full,
+        }
+
+        if content_layer is not None:
+            data["content_layer"] = content_layer
+
+        if page_no is not None:
+            data["page"] = page_no
+        if bbox is not None:
+            data["bbox"] = bbox
+
+        node_class = "section" if any(_iter_child_refs(item)) else "item"
+
+        return {"data": data, "classes": node_class}
+
+    def walk(ref: str) -> Optional[str]:
+        if ref in visited:
+            return visited[ref]
+
+        item = by_ref.get(ref)
+        if not item:
+            return None
+
+        node = make_node(ref, item)
+        if node is None:
+            visited[ref] = None  # mark as seen even if skipped
+            return None
+
+        visited[ref] = node["data"]["id"]
+        elements.append(node)
+
+        for child_ref in _iter_child_refs(item):
+            child_id = walk(child_ref)
+            if child_id:
+                edge = (node["data"]["id"], child_id)
+                if edge not in edges_seen:
+                    edges_seen.add(edge)
+                    elements.append({"data": {"source": edge[0], "target": edge[1]}, "classes": "hier"})
+
+        return node["data"]["id"]
+
+    for root in (doc.get("body"), doc.get("furniture")):
+        if not isinstance(root, dict):
+            continue
+        root_ref = root.get("self_ref")
+        if not isinstance(root_ref, str):
             continue
 
-        raw_label = str(t.get("label") or "text")
-        raw_text = str(t.get("text") or "")
-
-        if _is_noise_text(raw_label, raw_text):
-            continue
-
-        page_no, _ = _first_prov(t)
-        if page_no is None:
-            continue
-
-        pages.setdefault(page_no, []).append(t)
-
-    for page_no in sorted(pages.keys()):
-        page_id = _nid(f"{path}::page::{page_no}")
-
-        elements.append(
-            {
-                "data": {
-                    "id": page_id,
-                    "type": "chunk",
-                    "page": page_no,
-                    "label_short": f"PAGE {page_no}",
-                    "label_full": f"PAGE {page_no}",
-                    "label": f"PAGE {page_no}",
-                },
-                "classes": "section",
-            }
-        )
-
-        elements.append({"data": {"source": doc_id, "target": page_id}, "classes": "hier"})
-
-        page_texts = pages[page_no]
-        if MAX_TEXTS_PER_PAGE is not None:
-            page_texts = page_texts[:MAX_TEXTS_PER_PAGE]
-
-        for t in page_texts:
-            ref = t.get("self_ref") or t.get("id")
-            if not isinstance(ref, str):
-                ref = f"{path}::p{page_no}::{hashlib.md5(str(t).encode()).hexdigest()}"
-
-            text_id = _nid(ref)
-
-            raw_text = str(t.get("text") or "")
-            dtype = str(t.get("label") or "text").upper()
-            content_layer = t.get("content_layer")
-            _, bbox = _first_prov(t)
-
-            label_full = f"{dtype}: {raw_text}"
-            label_short = f"{dtype}: {_short(raw_text, 140)}"
-
-            elements.append(
-                {
-                    "data": {
-                        "id": text_id,
-                        "type": "text",
-                        "content_layer": content_layer,
-                        "text": raw_text,
-                        "page": page_no,
-                        "bbox": bbox,
-                        "label_short": label_short,
-                        "label_full": label_full,
-                        "label": label_full,
-                    },
-                    "classes": "item",
-                }
-            )
-
-            elements.append({"data": {"source": page_id, "target": text_id}, "classes": "hier"})
+        root_id = walk(root_ref)
+        if root_id:
+            elements.append({"data": {"source": doc_id, "target": root_id}, "classes": "hier"})
 
     return elements
