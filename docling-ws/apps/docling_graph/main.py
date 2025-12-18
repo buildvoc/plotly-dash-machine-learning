@@ -419,9 +419,12 @@ app.layout = html.Div(
 )
 def load_graph(path):
     if not path:
-        return [], None, None
+        return [], None, None, "No document selected", ""
 
-    g = build_graph_from_docling_json(path)
+    try:
+        g = build_graph_from_docling_json(path)
+    except ValueError as exc:
+        return [], None, None, f"Error: {exc}", ""
 
     node_index = {n["data"]["id"]: n for n in g.nodes if n.get("data", {}).get("id")}
 
@@ -431,7 +434,7 @@ def load_graph(path):
 
     store_graph = {"nodes": g.nodes, "edges": g.edges}
 
-    return elements, store_graph, node_index
+    return elements, store_graph, node_index, _source_label(path), _graph_stats(g)
 
 
 # -------------------------------------------------
@@ -531,14 +534,10 @@ def expand_on_click(node_data, elements, store_graph, node_index, mode, page_ran
     is_expanded = bool(tapped_element and tapped_element.get("data", {}).get("expanded"))
 
     def matches_mode(edge_data):
-        src, tgt, rel = (
-            edge_data.get("source"),
-            edge_data.get("target"),
-            edge_data.get("rel"),
-        )
+        src, tgt = edge_data.get("source"), edge_data.get("target")
 
         if mode == "children":
-            return rel == "hier" and src == node_id
+            return src == node_id
         if mode == "out":
             return src == node_id
         if mode == "in":

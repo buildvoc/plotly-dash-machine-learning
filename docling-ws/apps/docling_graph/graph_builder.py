@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 
-
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
 DEFAULT_JSON_ROOT = os.path.join(REPO_ROOT, "data", "docling")
 
@@ -149,6 +148,8 @@ def _parent_ref(item: Dict[str, Any]) -> Optional[str]:
         ref = parent.get("$ref")
         if isinstance(ref, str):
             return ref
+    if isinstance(parent, str):
+        return parent
     return None
 
 
@@ -171,6 +172,18 @@ def _should_skip_item(item: Dict[str, Any]) -> bool:
     raw_label = str(item.get("label") or item.get("type") or "text")
     raw_text = str(item.get("text") or "")
     return _is_noise_text(raw_label, raw_text) if raw_text else False
+
+
+def _ref_kind(ref: str) -> str:
+    if ref.startswith("#/body"):
+        return "body"
+    if ref.startswith("#/groups/") or ref == "#/groups":
+        return "group"
+    if ref.startswith("#/texts/") or ref == "#/texts":
+        return "text"
+    if ref.startswith("#/pictures/") or ref == "#/pictures":
+        return "picture"
+    return "item"
 
 
 def _collect_docling_items(doc: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -201,20 +214,55 @@ def _collect_docling_items(doc: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return items
 
 
-def _build_hierarchy_edges(items: Dict[str, Dict[str, Any]], allowed_refs: Set[str]) -> Set[Tuple[str, str]]:
-    edges: Set[Tuple[str, str]] = set()
+def _build_hierarchy_edges(items: Dict[str, Dict[str, Any]], allowed_refs: Set[str]) -> Set[Tuple[str, str, str]]:
+    edges: Set[Tuple[str, str, str]] = set()
+
+    def add_edge(src: str, tgt: str, rel: str) -> None:
+        edges.add((src, tgt, rel))
 
     for ref, item in items.items():
         if ref not in allowed_refs:
             continue
 
-        for child_ref in _child_refs(item):
-            if child_ref in allowed_refs:
-                edges.add((ref, child_ref))
+        kind = _ref_kind(ref)
 
+        # Children edges (body->group/text/picture, group->text)
+        for child_ref in _child_refs(item):
+            if child_ref not in allowed_refs:
+                continue
+            child_kind = _ref_kind(child_ref)
+
+            if kind == "body" and child_kind in {"group", "text", "picture"}:
+                add_edge(ref, child_ref, "children")
+                add_edge(child_ref, ref, "parent")
+            elif kind == "group" and child_kind == "text":
+                add_edge(ref, child_ref, "children")
+                add_edge(child_ref, ref, "parent")
+
+        # Parent edges (group/text/picture -> body, text -> group)
         parent_ref = _parent_ref(item)
         if parent_ref and parent_ref in allowed_refs:
-            edges.add((parent_ref, ref))
+            parent_kind = _ref_kind(parent_ref)
+
+            if kind in {"group", "text", "picture"} and parent_kind == "body":
+                add_edge(ref, parent_ref, "parent")
+            elif kind == "text" and parent_kind == "group":
+                add_edge(ref, parent_ref, "parent")
+
+        # Caption edges (picture -> text)
+        if kind == "picture":
+            captions = item.get("captions")
+            if isinstance(captions, list):
+                for cap in captions:
+                    if isinstance(cap, str):
+                        cap_ref = cap
+                    elif isinstance(cap, dict):
+                        cap_ref = cap.get("$ref")
+                    else:
+                        cap_ref = None
+
+                    if cap_ref and cap_ref in allowed_refs and _ref_kind(cap_ref) == "text":
+                        add_edge(ref, cap_ref, "captions")
 
     return edges
 
@@ -305,38 +353,42 @@ def build_graph_from_docling_json(path: str) -> GraphPayload:
             }
         )
 
+    rel_weights = {"document": 3, "children": 2, "parent": 1, "captions": 1}
+
     # Graph edges between nodes
-    for parent_ref, child_ref in sorted(edges_refs):
+    for parent_ref, child_ref, rel in sorted(edges_refs):
         edges.append(
             {
                 "data": {
-                    "id": _nid(f"{parent_ref}__{child_ref}"),
+                    "id": _nid(f"{parent_ref}__{child_ref}__{rel}"),
                     "source": _nid(parent_ref),
                     "target": _nid(child_ref),
-                    "rel": "hier",
-                    "weight": 2 if _child_refs(items.get(child_ref, {})) else 1,
+                    "rel": rel,
+                    "weight": rel_weights.get(rel, 1),
                 },
                 "classes": "hier",
             }
         )
 
     # Connect document to roots (nodes whose parents are not kept)
-    child_targets = {child_ref for _, child_ref in edges_refs}
-    for ref in sorted(allowed_refs):
-        parent_ref = _parent_ref(items[ref])
-        if (not parent_ref or parent_ref not in allowed_refs) and ref not in child_targets:
-            edges.append(
-                {
-                    "data": {
-                        "id": _nid(f"{doc_id}__{ref}"),
-                        "source": doc_id,
-                        "target": _nid(ref),
-                        "rel": "hier",
-                        "weight": 3,
-                    },
-                    "classes": "hier",
-                }
-            )
+    incoming_targets = {child_ref for _, child_ref, _ in edges_refs}
+    roots = {ref for ref in allowed_refs if ref not in incoming_targets}
+    if not roots and "#/body" in allowed_refs:
+        roots.add("#/body")
+
+    for ref in sorted(roots):
+        edges.append(
+            {
+                "data": {
+                    "id": _nid(f"{doc_id}__{ref}__document"),
+                    "source": doc_id,
+                    "target": _nid(ref),
+                    "rel": "document",
+                    "weight": rel_weights["document"],
+                },
+                "classes": "hier",
+            }
+        )
 
     return GraphPayload(nodes=nodes, edges=edges)
 
@@ -375,16 +427,23 @@ class GraphBuilderTests(unittest.TestCase):
             Path(tmp_path).unlink(missing_ok=True)
 
         self.assertEqual(len(payload.nodes), 3)
-        self.assertEqual(len(payload.edges), 2)
+        self.assertEqual(len(payload.edges), 3)
 
         node_ids = {n["data"]["id"] for n in payload.nodes}
-        edge_pairs = {(e["data"]["source"], e["data"]["target"]) for e in payload.edges}
+        edge_pairs = {(e["data"]["source"], e["data"]["target"], e["data"]["rel"]) for e in payload.edges}
 
         doc_id = _nid(tmp_path)
         body_id = _nid("#/body")
         text_id = _nid("#/texts/0")
 
-        self.assertEqual(edge_pairs, {(doc_id, body_id), (body_id, text_id)})
+        self.assertEqual(
+            edge_pairs,
+            {
+                (doc_id, body_id, "document"),
+                (body_id, text_id, "children"),
+                (text_id, body_id, "parent"),
+            },
+        )
         self.assertIn(doc_id, node_ids)
         self.assertIn(body_id, node_ids)
         self.assertIn(text_id, node_ids)

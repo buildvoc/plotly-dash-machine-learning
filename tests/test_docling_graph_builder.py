@@ -40,6 +40,65 @@ class DoclingGraphBuilderFixtureTests(unittest.TestCase):
             self.assertIn(edge["data"]["source"], node_ids)
             self.assertIn(edge["data"]["target"], node_ids)
 
+    def test_mermaid_relationships_applied(self):
+        doc = {
+            "body": {
+                "self_ref": "#/body",
+                "children": [{"$ref": "#/groups/0"}, {"$ref": "#/pictures/0"}],
+            },
+            "groups": [
+                {
+                    "self_ref": "#/groups/0",
+                    "parent": {"$ref": "#/body"},
+                    "children": [{"$ref": "#/texts/0"}],
+                }
+            ],
+            "texts": [
+                {
+                    "self_ref": "#/texts/0",
+                    "parent": {"$ref": "#/groups/0"},
+                    "text": "group text " * 5,
+                },
+                {
+                    "self_ref": "#/texts/1",
+                    "parent": {"$ref": "#/body"},
+                    "text": "body text " * 5,
+                },
+            ],
+            "pictures": [
+                {
+                    "self_ref": "#/pictures/0",
+                    "parent": {"$ref": "#/body"},
+                    "captions": [{"$ref": "#/texts/1"}],
+                }
+            ],
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
+            json.dump(doc, tmp)
+            tmp_path = tmp.name
+
+        try:
+            payload = gb.build_graph_from_docling_json(tmp_path)
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+        id_to_ref = {n["data"]["id"]: n["data"].get("ref") for n in payload.nodes}
+
+        edges = {
+            (id_to_ref.get(e["data"]["source"]), id_to_ref.get(e["data"]["target"]), e["data"]["rel"])
+            for e in payload.edges
+            if id_to_ref.get(e["data"]["target"]) is not None
+        }
+
+        self.assertIn(("#/body", "#/groups/0", "children"), edges)
+        self.assertIn(("#/body", "#/pictures/0", "children"), edges)
+        self.assertIn(("#/groups/0", "#/texts/0", "children"), edges)
+        self.assertIn(("#/texts/0", "#/groups/0", "parent"), edges)
+        self.assertIn(("#/texts/1", "#/body", "parent"), edges)
+        self.assertIn(("#/pictures/0", "#/texts/1", "captions"), edges)
+        self.assertTrue(any(e[2] == "document" for e in edges))
+
     def test_provenance_optional_does_not_crash(self):
         doc = {
             "body": {"self_ref": "#/body", "children": [{"$ref": "#/texts/0"}]},
