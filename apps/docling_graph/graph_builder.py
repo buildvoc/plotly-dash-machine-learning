@@ -110,11 +110,11 @@ def list_docling_files(json_root: Optional[str] = None) -> List[str]:
     if not search_root.is_dir():
         return results
 
-    for candidate in search_root.rglob("*"):
+    for candidate in search_root.iterdir():
         if candidate.is_file() and candidate.suffix.lower() == ".json":
             results.append(str(candidate))
 
-    return sorted(results, key=lambda p: (Path(p).name.lower(), str(Path(p))))
+    return sorted(results, key=lambda p: Path(p).name.lower())
 
 
 def _is_noise_text(label: str, text: str) -> bool:
