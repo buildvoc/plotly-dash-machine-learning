@@ -500,6 +500,8 @@ def expand_on_click(node_data, elements, store_graph, node_index, mode, page_ran
     if not node_data or not store_graph:
         return no_update
 
+    elements = elements or []
+
     node_id = node_data.get("id")
     if not node_id:
         return no_update
