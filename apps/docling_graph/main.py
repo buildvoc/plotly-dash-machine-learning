@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import unittest
 from typing import Any, Dict, Iterable, List, Tuple
 
 from dash import ALL, Dash, Input, Output, State, dcc, html, no_update, ctx
@@ -352,6 +353,7 @@ def _xlsx_bytes(sheets: Dict[str, List[List[Any]]]) -> bytes:
 LAYOUTS = [
     ("Dagre (sequence)", "dagre"),
     ("Breadthfirst", "breadthfirst"),
+    ("ForceAtlas2", "forceatlas2"),
     ("Force-directed (COSE)", "cose"),
     ("COSE-Bilkent", "cose-bilkent"),
     ("Cola (read text)", "cola"),
@@ -383,6 +385,19 @@ def layout_for(name: str, scaling_ratio: int) -> Dict[str, Any]:
             "flow": {"axis": "y", "minSeparation": 40},
             "fit": True,
             "padding": 30,
+        }
+
+    if name == "forceatlas2":
+        return {
+            "name": "forceatlas2",
+            "iterations": 800,
+            "scalingRatio": max(0.5, s / 100),
+            "gravity": 1.0,
+            "linLogMode": False,
+            "preventOverlap": True,
+            "fit": True,
+            "padding": 30,
+            "animate": False,
         }
 
     if name in ("cose", "cose-bilkent", "euler"):
@@ -928,6 +943,19 @@ def show_node(data):
 )
 def show_edge(data):
     return json.dumps(data, indent=2)
+
+
+# -------------------------------------------------
+# Tests
+# -------------------------------------------------
+class LayoutTests(unittest.TestCase):
+    def test_forceatlas2_is_in_layouts(self):
+        layout_values = {value for _, value in LAYOUTS}
+        self.assertIn("forceatlas2", layout_values)
+
+    def test_layout_for_forceatlas2(self):
+        layout = layout_for("forceatlas2", 250)
+        self.assertEqual(layout.get("name"), "forceatlas2")
 
 
 # -------------------------------------------------
