@@ -698,7 +698,7 @@ def update_filters(metadata):
     Input("min_edge_weight", "value"),
     Input("store_theme", "data"),
     Input("store_highlight", "data"),
-    prevent_initial_call=False,
+    prevent_initial_call="initial_duplicate",
 )
 def apply_filters(
     graph,
