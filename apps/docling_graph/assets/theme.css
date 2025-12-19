@@ -1,38 +1,30 @@
+:root {
+  --gc-bg: #0b0f17;
+  --gc-panel-bg: #0f172a;
+  --gc-panel-border: #111827;
+  --gc-text: #e5e7eb;
+  --gc-muted: #94a3b8;
+  --gc-accent: #7c3aed;
+  --gc-graph-bg: #0b0f17;
+  --gc-button-bg: #111827;
+  --gc-button-border: #1f2937;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --gc-bg: #f8fafc;
+    --gc-panel-bg: #ffffff;
+    --gc-panel-border: #e2e8f0;
+    --gc-text: #0f172a;
+    --gc-muted: #475569;
+    --gc-accent: #7c3aed;
+    --gc-graph-bg: #ffffff;
+    --gc-button-bg: #f1f5f9;
+    --gc-button-border: #cbd5f5;
+  }
+}
+
 html, body {
-  background: #121212;
-  color: #eaeaea;
-}
-
-.app-root {
-  display: flex;
-  background: #121212;
-}
-
-.sidebar {
-  width: 340px;
-  background: #1b1b1b;
-  padding: 12px;
-  border-right: 1px solid #333;
-}
-
-label {
-  color: #ccc;
-}
-
-.Select-control,
-.Select-menu-outer {
-  background: #222;
-  color: #fff;
-}
-
-.rc-slider-track {
-  background-color: #9b4dff;
-}
-
-.rc-slider-handle {
-  border-color: #9b4dff;
-}
-
-.rc-slider-rail {
-  background-color: #333;
+  background: var(--gc-bg);
+  color: var(--gc-text);
 }
