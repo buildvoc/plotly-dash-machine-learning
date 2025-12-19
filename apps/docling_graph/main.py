@@ -6,19 +6,19 @@ import csv
 import io
 import zipfile
 from xml.sax.saxutils import escape
-from dash import Dash, html, dcc, Input, Output, State, no_update, ALL
+from dash import Dash, html, dcc, Input, Output, State, no_update
 import dash_cytoscape as cyto
 import dash
 
-from .graph_builder import (
-    build_adjacency_indexes,
-    build_graph_from_docling_json,
-    expand_group,
-    filter_revealed,
-    group_key,
-    initial_reveal,
-    list_docling_files,
-    GraphPayload,
+from .graph_builder import build_graph_from_docling_json, list_docling_files, GraphPayload
+from .theme import (
+    get_cytoscape_stylesheet,
+    get_edge_colors,
+    get_edge_style,
+    get_edge_legend_items,
+    get_node_colors,
+    get_node_legend_items,
+    get_theme_tokens,
 )
 from .theme import (
     get_cytoscape_stylesheet,
@@ -134,12 +134,55 @@ def layout_for(name: str, scaling_ratio: int):
     return {"name": name, "fit": True, "padding": 30}
 
 
-GRAPH_BASE_STYLE = {
-    "width": "100%",
-    "height": "85vh",
-}
-
-DEFAULT_BATCH_SIZE = 10
+def base_stylesheet(
+    node_size,
+    font_size,
+    text_max_width,
+    show_edge_labels,
+    scale_node_size,
+    scale_edge_width,
+):
+    node_width = "data(size)" if scale_node_size else f"{node_size}px"
+    node_height = "data(size)" if scale_node_size else f"{node_size}px"
+    edge_width = "data(width)" if scale_edge_width else 1.5
+    return [
+        {
+            "selector": "node",
+            "style": {
+                "label": "data(label)",
+                "font-size": f"{font_size}px",
+                "text-wrap": "wrap",
+                "text-max-width": f"{text_max_width}px",
+                "color": "#E5E7EB",
+                "text-outline-width": 1,
+                "text-outline-color": "#0B1220",
+                "width": node_width,
+                "height": node_height,
+                "z-index": 9999,
+            },
+        },
+        {
+            "selector": "edge",
+            "style": {
+                "curve-style": "bezier",
+                "line-color": "#64748B",
+                "target-arrow-color": "#64748B",
+                "target-arrow-shape": "triangle",
+                "arrow-scale": 0.8,
+                "opacity": 0.55,
+                "label": "data(rel)" if show_edge_labels else "",
+                "font-size": "9px",
+                "color": "#CBD5E1",
+                "width": edge_width,
+                "z-index": 5000,
+            },
+        },
+        {"selector": ".document", "style": {"background-color": "#1D4ED8"}},
+        {"selector": ".body", "style": {"background-color": "#0EA5E9"}},
+        {"selector": ".page", "style": {"background-color": "#111827"}},
+        {"selector": ".text", "style": {"background-color": "#334155"}},
+        {"selector": ":selected", "style": {"border-width": 3, "border-color": "#FBBF24"}},
+    ]
 
 
 # -------------------------------------------------
@@ -154,7 +197,6 @@ DEFAULT_VIEW = {
     "font_size": 10,
     "text_max_width": 520,
     "show_edge_labels": False,
-    "theme": "dark",
     "scale_node_size": True,
     "scale_edge_width": True,
     "min_node_weight": 1,
@@ -176,10 +218,6 @@ app.layout = html.Div(
     children=[
         dcc.Store(id="store_graph"),
         dcc.Store(id="store_node_index"),
-        dcc.Store(id="store_adjacency"),
-        dcc.Store(id="store_revealed"),
-        dcc.Store(id="store_paging"),
-        dcc.Store(id="store_selected"),
         dcc.Download(id="download_csv"),
         dcc.Download(id="download_xlsx"),
 
@@ -203,15 +241,13 @@ app.layout = html.Div(
                                 DEFAULT_VIEW["layout"],
                                 DEFAULT_VIEW["scaling_ratio"],
                             ),
-                            stylesheet=get_cytoscape_stylesheet(
-                                DEFAULT_VIEW["theme"],
-                                node_size=DEFAULT_VIEW["node_size"],
-                                font_size=DEFAULT_VIEW["font_size"],
-                                text_max_width=DEFAULT_VIEW["text_max_width"],
-                                show_edge_labels=DEFAULT_VIEW["show_edge_labels"],
-                                scale_node_size=DEFAULT_VIEW["scale_node_size"],
-                                scale_edge_width=DEFAULT_VIEW["scale_edge_width"],
-                                show_arrows=True,
+                            stylesheet=base_stylesheet(
+                                DEFAULT_VIEW["node_size"],
+                                DEFAULT_VIEW["font_size"],
+                                DEFAULT_VIEW["text_max_width"],
+                                DEFAULT_VIEW["show_edge_labels"],
+                                DEFAULT_VIEW["scale_node_size"],
+                                DEFAULT_VIEW["scale_edge_width"],
                             ),
                             elements=[],
                         )
@@ -350,23 +386,6 @@ app.layout = html.Div(
                                                     ],
                                                 ),
                                                 html.Div(
-                                                    className="control-section control-section--tight",
-                                                    children=[
-                                                        dcc.Checklist(
-                                                            id="view_toggles",
-                                                            options=[
-                                                                {"label": " Show arrows", "value": "arrows"},
-                                                                {"label": " Focus mode", "value": "focus"},
-                                                                {"label": " Hide Page nodes", "value": "hide_pages"},
-                                                                {"label": " Hide isolated nodes", "value": "hide_isolated"},
-                                                            ],
-                                                            value=["arrows"],
-                                                            inputClassName="control-checkbox",
-                                                            labelClassName="control-checkbox__label",
-                                                        ),
-                                                    ],
-                                                ),
-                                                html.Div(
                                                     className="control-section",
                                                     children=[
                                                         html.Div("Weights", className="control-label"),
@@ -420,28 +439,10 @@ app.layout = html.Div(
                                                 html.Div(
                                                     className="control-section",
                                                     children=[
-                                                        html.Button("Reset view", id="reset_view", className="control-button"),
-                                                    ],
-                                                ),
-                                                html.Div(
-                                                    className="control-section",
-                                                    children=[
                                                         html.Div("Hover details", className="control-label"),
                                                         html.Pre(id="hover-node-output", style={"whiteSpace": "pre-wrap"}),
                                                         html.Pre(id="hover-edge-output", style={"whiteSpace": "pre-wrap"}),
                                                     ],
-                                                ),
-                                                html.Div(
-                                                    className="control-section",
-                                                    children=[
-                                                        html.Div("Inspector", className="control-label"),
-                                                        html.Div(id="inspector_panel"),
-                                                    ],
-                                                ),
-                                                html.Details(
-                                                    id="legend_container",
-                                                    open=True,
-                                                    children=[],
                                                 ),
                                             ],
                                         )
@@ -513,7 +514,9 @@ def load_graph(path):
         "core_nodes": list(core_nodes),
     }
 
-    elements = _build_elements(g.nodes, g.edges, revealed_nodes, revealed_edges)
+    # Genesis node: document
+    doc_node = next((n for n in g.nodes if n["data"].get("type") == "Document"), None)
+    elements = [doc_node] if doc_node else []
 
     store_graph = {"nodes": g.nodes, "edges": g.edges}
     store_adjacency = {"out": out_index, "in": in_index}
@@ -718,30 +721,17 @@ def select_node_from_search(node_id, store_revealed, store_graph):
     }
     return node_id, store_revealed
 
+    child_edges = {"HAS_PAGE", "HAS_BODY", "CONTAINS", "ON_PAGE"}
+    for ed in store_graph["edges"]:
+        d = ed["data"]
+        src, tgt, rel = d.get("source"), d.get("target"), d.get("rel")
 
-@app.callback(
-    Output("store_revealed", "data"),
-    Output("store_paging", "data"),
-    Output("store_selected", "data"),
-    Input("reset_view", "n_clicks"),
-    State("store_node_index", "data"),
-    State("store_adjacency", "data"),
-    prevent_initial_call=True,
-)
-def reset_view(n_clicks, node_index, adjacency):
-    if not n_clicks or not node_index or not adjacency:
-        return no_update, no_update, no_update
-
-    revealed_nodes, revealed_edges, paging, core_nodes = initial_reveal(
-        node_index,
-        adjacency.get("out", {}),
-        DEFAULT_BATCH_SIZE,
-    )
-    return (
-        {"nodes": list(revealed_nodes), "edges": list(revealed_edges), "core_nodes": list(core_nodes)},
-        paging,
-        None,
-    )
+        if mode == "children" and not (rel in child_edges and src == node_id):
+            continue
+        if mode == "out" and src != node_id:
+            continue
+        if mode == "in" and tgt != node_id:
+            continue
 
 
 @app.callback(
@@ -863,6 +853,136 @@ def update_styles(edge_labels, weight_toggles, view_toggles, theme):
 
 
 @app.callback(
+    Output("graph", "elements", allow_duplicate=True),
+    Input("page_range", "value"),
+    Input("min_node_weight", "value"),
+    Input("min_edge_weight", "value"),
+    Input("weight_toggles", "value"),
+    State("graph", "elements"),
+    prevent_initial_call=True,
+)
+def filter_elements_by_page(page_range, min_node_weight, min_edge_weight, weight_toggles, elements):
+    if not page_range or not elements:
+        return no_update
+
+    keep_context = "context" in (weight_toggles or [])
+    node_threshold = float(min_node_weight or 1)
+    edge_threshold = float(min_edge_weight or 1)
+
+    start_page, end_page = page_range
+    allowed_nodes = set()
+    filtered_nodes = []
+
+    for el in elements:
+        data = el.get("data", {})
+        if "source" in data:
+            continue
+
+        page = data.get("page")
+        weight = float(data.get("weight") or 0)
+        if page is None or (start_page <= page <= end_page):
+            if weight >= node_threshold:
+                allowed_nodes.add(data.get("id"))
+                filtered_nodes.append(el)
+
+    filtered_edges = []
+    context_nodes = set()
+    for el in elements:
+        data = el.get("data", {})
+        if "source" not in data:
+            continue
+        weight = float(data.get("weight") or 0)
+        if weight < edge_threshold:
+            continue
+        src = data.get("source")
+        tgt = data.get("target")
+        if src in allowed_nodes and tgt in allowed_nodes:
+            filtered_edges.append(el)
+        elif keep_context and (src in allowed_nodes or tgt in allowed_nodes):
+            context_nodes.update([src, tgt])
+            filtered_edges.append(el)
+
+    if keep_context and context_nodes:
+        for el in elements:
+            data = el.get("data", {})
+            if "source" in data:
+                continue
+            node_id = data.get("id")
+            page = data.get("page")
+            if node_id in context_nodes and (page is None or (start_page <= page <= end_page)):
+                if node_id not in allowed_nodes:
+                    allowed_nodes.add(node_id)
+                    filtered_nodes.append(el)
+
+
+@app.callback(
+    Output("legend_container", "children"),
+    Output("legend_container", "style"),
+    Input("theme", "value"),
+)
+def update_legend(theme):
+    tokens = get_theme_tokens(theme or DEFAULT_VIEW["theme"])
+    style = {
+        "backgroundColor": tokens["panel"],
+        "color": tokens["text"],
+        "border": f"1px solid {tokens['panel_border']}",
+    }
+    return build_legend(theme or DEFAULT_VIEW["theme"]), style
+
+
+def _filter_edge_entries(
+    entries,
+    node_index,
+    edge_types,
+    node_types,
+    hide_pages,
+    page_range,
+    min_node_weight,
+    min_edge_weight,
+    direction,
+):
+    filtered = []
+    for entry in entries:
+        edge_type = entry.get("type")
+        if edge_types and edge_type not in edge_types:
+            continue
+        if min_edge_weight is not None and float(entry.get("weight") or 0) < min_edge_weight:
+            continue
+        neighbor_id = entry.get("target") if direction == "out" else entry.get("source")
+        neighbor = node_index.get(neighbor_id, {})
+        data = neighbor.get("data", {})
+        node_type = data.get("type")
+        if node_types and node_type not in node_types:
+            continue
+        if hide_pages and node_type == "Page":
+            continue
+        if page_range and data.get("page") is not None:
+            if not (page_range[0] <= data.get("page") <= page_range[1]):
+                continue
+        if min_node_weight is not None and float(data.get("weight") or 0) < min_node_weight:
+            continue
+        filtered.append({**entry, "neighbor_id": neighbor_id})
+    return filtered
+
+
+@app.callback(
+    Output("graph", "stylesheet"),
+    Input("edge_labels", "value"),
+    Input("weight_toggles", "value"),
+)
+def update_styles(edge_labels, weight_toggles):
+    weight_toggles = weight_toggles or []
+    return base_stylesheet(
+        DEFAULT_VIEW["node_size"],
+        DEFAULT_VIEW["font_size"],
+        DEFAULT_VIEW["text_max_width"],
+        "on" in (edge_labels or []),
+        "node" in weight_toggles,
+        "edge" in weight_toggles,
+    )
+
+
+@app.callback(
     Output("graph", "style"),
     Input("theme", "value"),
 )
@@ -937,192 +1057,6 @@ def update_legend(theme):
         "border": f"1px solid {tokens['panel_border']}",
     }
     return build_legend(theme or DEFAULT_VIEW["theme"]), style
-
-
-def _filter_edge_entries(
-    entries,
-    node_index,
-    edge_types,
-    node_types,
-    hide_pages,
-    page_range,
-    min_node_weight,
-    min_edge_weight,
-    direction,
-):
-    filtered = []
-    for entry in entries:
-        edge_type = entry.get("type")
-        if edge_types and edge_type not in edge_types:
-            continue
-        if min_edge_weight is not None and float(entry.get("weight") or 0) < min_edge_weight:
-            continue
-        neighbor_id = entry.get("target") if direction == "out" else entry.get("source")
-        neighbor = node_index.get(neighbor_id, {})
-        data = neighbor.get("data", {})
-        node_type = data.get("type")
-        if node_types and node_type not in node_types:
-            continue
-        if hide_pages and node_type == "Page":
-            continue
-        if page_range and data.get("page") is not None:
-            if not (page_range[0] <= data.get("page") <= page_range[1]):
-                continue
-        if min_node_weight is not None and float(data.get("weight") or 0) < min_node_weight:
-            continue
-        filtered.append({**entry, "neighbor_id": neighbor_id})
-    return filtered
-
-
-@app.callback(
-    Output("inspector_panel", "children"),
-    Output("inspector_panel", "style"),
-    Input("store_selected", "data"),
-    Input("store_graph", "data"),
-    Input("store_node_index", "data"),
-    Input("store_adjacency", "data"),
-    Input("store_revealed", "data"),
-    Input("store_paging", "data"),
-    Input("node_type_filter", "value"),
-    Input("edge_type_filter", "value"),
-    Input("page_range", "value"),
-    Input("min_node_weight", "value"),
-    Input("min_edge_weight", "value"),
-    Input("view_toggles", "value"),
-    Input("theme", "value"),
-)
-def update_inspector(
-    selected_node_id,
-    store_graph,
-    node_index,
-    adjacency,
-    store_revealed,
-    store_paging,
-    node_type_filter,
-    edge_type_filter,
-    page_range,
-    min_node_weight,
-    min_edge_weight,
-    view_toggles,
-    theme,
-):
-    tokens = get_theme_tokens(theme or DEFAULT_VIEW["theme"])
-    style = {
-        "backgroundColor": tokens["panel"],
-        "color": tokens["text"],
-        "border": f"1px solid {tokens['panel_border']}",
-        "padding": "10px",
-        "borderRadius": "8px",
-    }
-    if not selected_node_id or not node_index or not adjacency:
-        return "Select a node to inspect.", style
-
-    node = node_index.get(selected_node_id, {})
-    data = node.get("data", {})
-    node_title = data.get("name") or data.get("label") or data.get("id")
-    node_type = data.get("type", "Unknown")
-    description = data.get("description") or ""
-
-    revealed_edges = set(store_revealed.get("edges", [])) if store_revealed else set()
-    node_types = set(node_type_filter or []) or None
-    edge_types = set(edge_type_filter or []) or None
-    hide_pages = "hide_pages" in (view_toggles or [])
-    page_bounds = tuple(page_range) if page_range else None
-
-    sections = []
-    for direction in ("out", "in"):
-        direction_edges = []
-        index = adjacency.get("out" if direction == "out" else "in", {}).get(selected_node_id, {})
-        for edge_type, entries in index.items():
-            filtered_entries = _filter_edge_entries(
-                entries,
-                node_index,
-                edge_types,
-                node_types,
-                hide_pages,
-                page_bounds,
-                float(min_node_weight or 0),
-                float(min_edge_weight or 0),
-                direction,
-            )
-            if not filtered_entries:
-                continue
-            total_count = len(filtered_entries)
-            key = group_key(selected_node_id, direction, edge_type)
-            stored_offset = int((store_paging or {}).get(key, 0))
-            visible_entries = filtered_entries[:offset]
-            revealed_count = sum(1 for entry in filtered_entries if entry.get("edge_id") in revealed_edges)
-            offset = max(stored_offset, min(revealed_count, total_count))
-            visible_entries = filtered_entries[:offset]
-
-            node_rows = []
-            for entry in visible_entries:
-                neighbor_id = entry["neighbor_id"]
-                neighbor = node_index.get(neighbor_id, {})
-                ndata = neighbor.get("data", {})
-                neighbor_label = ndata.get("name") or ndata.get("label") or neighbor_id
-                node_rows.append(
-                    html.Button(
-                        f'{ndata.get("type")} · {neighbor_label}',
-                        id={"type": "select-node", "node_id": neighbor_id},
-                        className="inspector-node",
-                    )
-                )
-
-            controls = []
-            if offset < total_count:
-                controls.append(
-                    html.Button(
-                        "Expand",
-                        id={"type": "expand-group", "node_id": selected_node_id, "direction": direction, "edge_type": edge_type},
-                        className="control-button",
-                    )
-                )
-            if offset > 0:
-                controls.append(
-                    html.Button(
-                        "Collapse",
-                        id={"type": "collapse-group", "node_id": selected_node_id, "direction": direction, "edge_type": edge_type},
-                        className="control-button",
-                    )
-                )
-
-            direction_edges.append(
-                html.Div(
-                    className="inspector-group",
-                    children=[
-                        html.Div(
-                            f'{_direction_label(direction)} {edge_type} ({revealed_count}/{total_count})',
-                            className="inspector-group__title",
-                        ),
-                        html.Div(node_rows or [html.Div("No revealed nodes", className="inspector-empty")]),
-                        html.Div(controls, className="inspector-controls"),
-                    ],
-                )
-            )
-
-        if direction_edges:
-            sections.append(
-                html.Div(
-                    className="inspector-section",
-                    children=[
-                        html.Div(f"{_direction_label(direction)} {direction.title()} connections", className="inspector-section__title"),
-                        html.Div(direction_edges),
-                    ],
-                )
-            )
-
-    return (
-        html.Div(
-            children=[
-                html.Div(node_title, className="inspector-title"),
-                html.Div(node_type, className="inspector-subtitle"),
-                html.Div(description, className="inspector-description"),
-                html.Div(sections or "No connections match the current filters.", className="inspector-connections"),
-            ]
-        ),
-        style,
-    )
 
 
 @app.callback(

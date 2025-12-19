@@ -99,15 +99,11 @@ def get_cytoscape_stylesheet(
     show_edge_labels: bool,
     scale_node_size: bool,
     scale_edge_width: bool,
-    show_arrows: bool,
 ) -> List[Dict[str, Dict[str, str]]]:
     tokens = THEME_TOKENS[theme]
     node_width = "data(size)" if scale_node_size else f"{node_size}px"
     node_height = "data(size)" if scale_node_size else f"{node_size}px"
     edge_width = "data(width)" if scale_edge_width else 1.5
-
-    arrow_shape = "triangle" if show_arrows else "none"
-    arrow_scale = 0.8 if show_arrows else 0
 
     stylesheet = [
         {
@@ -134,8 +130,8 @@ def get_cytoscape_stylesheet(
                 "curve-style": "bezier",
                 "line-color": tokens["edge_label"],
                 "target-arrow-color": tokens["edge_label"],
-                "target-arrow-shape": arrow_shape,
-                "arrow-scale": arrow_scale,
+                "target-arrow-shape": "triangle",
+                "arrow-scale": 0.8,
                 "opacity": 0.65,
                 "label": "data(rel)" if show_edge_labels else "",
                 "font-size": "9px",
@@ -166,28 +162,6 @@ def get_cytoscape_stylesheet(
             "style": {
                 "line-color": tokens["hover"],
                 "target-arrow-color": tokens["hover"],
-            },
-        },
-        {
-            "selector": ".dimmed",
-            "style": {
-                "opacity": 0.15,
-                "text-opacity": 0.15,
-            },
-        },
-        {
-            "selector": ".highlight-edge",
-            "style": {
-                "line-color": tokens["selected"],
-                "target-arrow-color": tokens["selected"],
-                "width": 3,
-            },
-        },
-        {
-            "selector": ".highlight-node",
-            "style": {
-                "border-width": 3,
-                "border-color": tokens["selected"],
             },
         },
     ]
