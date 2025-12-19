@@ -8,21 +8,11 @@ import zipfile
 from xml.sax.saxutils import escape
 from dash import Dash, html, dcc, Input, Output, State, no_update
 import dash_cytoscape as cyto
-import dash
 
 from .graph_builder import (
     build_graph_from_docling_json,
     list_docling_files,
     GraphPayload,
-)
-from .theme import (
-    get_cytoscape_stylesheet,
-    get_edge_colors,
-    get_edge_style,
-    get_edge_legend_items,
-    get_node_colors,
-    get_node_legend_items,
-    get_theme_tokens,
 )
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -50,28 +40,6 @@ def pages_from_nodes(nodes):
         }
     )
 
-
-def _build_edge_index(edges):
-    return {e["data"]["id"]: e for e in edges if e.get("data", {}).get("id")}
-
-
-def _build_elements(nodes, edges, node_ids, edge_ids):
-    node_map = {n["data"]["id"]: n for n in nodes if n.get("data", {}).get("id")}
-    edge_map = {e["data"]["id"]: e for e in edges if e.get("data", {}).get("id")}
-    elements = [node_map[nid] for nid in node_ids if nid in node_map]
-    elements.extend(edge_map[eid] for eid in edge_ids if eid in edge_map)
-    return elements
-
-
-def _direction_label(direction: str) -> str:
-    return "→" if direction == "out" else "←"
-
-
-def _group_edges(adjacency, node_id: str, direction: str, edge_type: str):
-    if not adjacency:
-        return []
-    index = adjacency.get("out") if direction == "out" else adjacency.get("in")
-    return index.get(node_id, {}).get(edge_type, [])
 
 # -------------------------------------------------
 # Layout + Styles (dark-mode, inverted demo)
@@ -336,20 +304,17 @@ app.layout = html.Div(
                                                 html.Div(
                                                     className="control-section",
                                                     children=[
-                                                        html.Div("Filters", className="control-label"),
-                                                        dcc.Dropdown(
-                                                            id="node_type_filter",
-                                                            multi=True,
-                                                            placeholder="Filter node types",
-                                                        ),
-                                                        dcc.Dropdown(
-                                                            id="edge_type_filter",
-                                                            multi=True,
-                                                            placeholder="Filter edge types",
-                                                        ),
-                                                        dcc.Dropdown(
-                                                            id="node_search",
-                                                            placeholder="Search node by name",
+                                                        html.Div("Expand", className="control-label"),
+                                                        dcc.RadioItems(
+                                                            id="expand_mode",
+                                                            options=[
+                                                                {"label": "Children (hier)", "value": "children"},
+                                                                {"label": "All outgoing", "value": "out"},
+                                                                {"label": "All incoming", "value": "in"},
+                                                            ],
+                                                            value="children",
+                                                            inputClassName="control-radio",
+                                                            labelClassName="control-radio__label",
                                                         ),
                                                     ],
                                                 ),
@@ -466,63 +431,23 @@ app.layout = html.Div(
     Output("graph", "elements"),
     Output("store_graph", "data"),
     Output("store_node_index", "data"),
-    Output("store_adjacency", "data"),
-    Output("store_revealed", "data"),
-    Output("store_paging", "data"),
-    Output("store_selected", "data"),
-    Output("node_type_filter", "options"),
-    Output("edge_type_filter", "options"),
-    Output("node_search", "options"),
     Input("file", "value"),
 )
 def load_graph(path):
     if not path:
-        return [], None, None, None, None, None, None, [], [], []
+        return [], None, None
 
     g = build_graph_from_docling_json(path)
 
     node_index = {n["data"]["id"]: n for n in g.nodes if n.get("data", {}).get("id")}
-    out_index, in_index = build_adjacency_indexes(g.edges)
-    revealed_nodes, revealed_edges, paging, core_nodes = initial_reveal(
-        node_index,
-        out_index,
-        DEFAULT_BATCH_SIZE,
-    )
-    store_revealed = {
-        "nodes": list(revealed_nodes),
-        "edges": list(revealed_edges),
-        "core_nodes": list(core_nodes),
-    }
 
     # Genesis node: document
     doc_node = next((n for n in g.nodes if n["data"].get("type") == "Document"), None)
     elements = [doc_node] if doc_node else []
 
     store_graph = {"nodes": g.nodes, "edges": g.edges}
-    store_adjacency = {"out": out_index, "in": in_index}
 
-    node_types = sorted({n["data"].get("type") for n in g.nodes if n.get("data")})
-    edge_types = sorted({e["data"].get("rel") for e in g.edges if e.get("data")})
-    node_type_options = [{"label": t, "value": t} for t in node_types if t]
-    edge_type_options = [{"label": t, "value": t} for t in edge_types if t]
-    search_options = [
-        {"label": f'{n["data"].get("name")} ({n["data"].get("type")})', "value": n["data"]["id"]}
-        for n in g.nodes
-        if n.get("data", {}).get("name")
-    ]
-
-    return (
-        elements,
-        store_graph,
-        node_index,
-        store_adjacency,
-        store_revealed,
-        paging,
-        None,
-        node_type_options,
-        edge_type_options,
-        search_options,
-    )
+    return elements, store_graph, node_index
 
 
 @app.callback(
@@ -558,148 +483,37 @@ def show_page_range(value):
 
 
 @app.callback(
-    Output("graph", "layout"),
-    Input("layout", "value"),
-    Input("scaling_ratio", "value"),
-)
-def update_layout(name, scaling):
-    return layout_for(name, scaling)
-
-
-@app.callback(
     Output("graph", "elements", allow_duplicate=True),
-    Input("store_graph", "data"),
-    Input("store_node_index", "data"),
-    Input("store_revealed", "data"),
-    Input("store_selected", "data"),
-    Input("node_type_filter", "value"),
-    Input("edge_type_filter", "value"),
-    Input("page_range", "value"),
-    Input("min_node_weight", "value"),
-    Input("min_edge_weight", "value"),
-    Input("weight_toggles", "value"),
-    Input("view_toggles", "value"),
-    prevent_initial_call=True,
-)
-def update_elements(
-    store_graph,
-    node_index,
-    store_revealed,
-    selected_node_id,
-    node_type_filter,
-    edge_type_filter,
-    page_range,
-    min_node_weight,
-    min_edge_weight,
-    weight_toggles,
-    view_toggles,
-):
-    if not store_graph or not node_index or not store_revealed:
-        return no_update
-
-    revealed_nodes = set(store_revealed.get("nodes", []))
-    revealed_edges = set(store_revealed.get("edges", []))
-    edge_index = _build_edge_index(store_graph.get("edges", []))
-
-    node_types = set(node_type_filter or []) or None
-    edge_types = set(edge_type_filter or []) or None
-    keep_context = "context" in (weight_toggles or [])
-    hide_pages = "hide_pages" in (view_toggles or [])
-    hide_isolated = "hide_isolated" in (view_toggles or [])
-    page_bounds = tuple(page_range) if page_range else None
-
-    filtered_nodes, filtered_edges = filter_revealed(
-        revealed_nodes,
-        revealed_edges,
-        node_index,
-        edge_index,
-        node_types=node_types,
-        edge_types=edge_types,
-        hide_pages=hide_pages,
-        hide_isolated=hide_isolated,
-        page_range=page_bounds,
-        min_node_weight=float(min_node_weight or 0),
-        min_edge_weight=float(min_edge_weight or 0),
-        keep_context=keep_context,
-    )
-
-    elements = _build_elements(store_graph.get("nodes", []), store_graph.get("edges", []), filtered_nodes, filtered_edges)
-
-    if selected_node_id:
-        incident_edges = set()
-        neighbor_nodes = {selected_node_id}
-        for edge_id in filtered_edges:
-            edge = edge_index.get(edge_id, {})
-            data = edge.get("data", {})
-            source = data.get("source")
-            target = data.get("target")
-            if selected_node_id in (source, target):
-                incident_edges.add(edge_id)
-                neighbor_nodes.update([source, target])
-
-        focus_mode = "focus" in (view_toggles or [])
-
-        updated = []
-        for el in elements:
-            data = el.get("data", {})
-            classes = el.get("classes", "")
-            if "source" in data:
-                if data.get("id") in incident_edges:
-                    classes = f"{classes} highlight-edge".strip()
-                elif focus_mode:
-                    classes = f"{classes} dimmed".strip()
-            else:
-                if data.get("id") == selected_node_id:
-                    el = {**el, "selected": True}
-                    classes = f"{classes} highlight-node".strip()
-                elif focus_mode and data.get("id") not in neighbor_nodes:
-                    classes = f"{classes} dimmed".strip()
-            updated.append({**el, "classes": classes})
-        elements = updated
-
-    return elements
-
-
-@app.callback(
-    Output("store_selected", "data"),
     Input("graph", "tapNodeData"),
-    prevent_initial_call=True,
-)
-def select_node_from_graph(node_data):
-    if not node_data:
-        return no_update
-    return node_data.get("id") or no_update
-
-
-@app.callback(
-    Output("store_selected", "data", allow_duplicate=True),
-    Output("store_revealed", "data", allow_duplicate=True),
-    Input("node_search", "value"),
-    State("store_revealed", "data"),
+    State("graph", "elements"),
     State("store_graph", "data"),
+    State("store_node_index", "data"),
+    State("expand_mode", "value"),
+    State("page_range", "value"),
     prevent_initial_call=True,
 )
-def select_node_from_search(node_id, store_revealed, store_graph):
-    if not node_id or not store_revealed or not store_graph:
-        return no_update, no_update
+def expand_on_click(node_data, elements, store_graph, node_index, mode, page_range):
+    if not node_data or not store_graph or not page_range:
+        return no_update
 
-    revealed_nodes = set(store_revealed.get("nodes", []))
-    revealed_edges = set(store_revealed.get("edges", []))
-    if node_id not in revealed_nodes:
-        revealed_nodes.add(node_id)
-        edge_index = _build_edge_index(store_graph.get("edges", []))
-        for edge in edge_index.values():
-            data = edge.get("data", {})
-            if node_id in (data.get("source"), data.get("target")):
-                revealed_edges.add(data.get("id"))
-                revealed_nodes.update([data.get("source"), data.get("target")])
+    node_id = node_data.get("id")
+    if not node_id:
+        return no_update
 
-    store_revealed = {
-        **store_revealed,
-        "nodes": list(revealed_nodes),
-        "edges": list(revealed_edges),
-    }
-    return node_id, store_revealed
+    start_page, end_page = page_range
+
+    def in_range(page):
+        return page is None or (start_page <= page <= end_page)
+
+    existing_nodes = {e["data"]["id"] for e in elements if "id" in e.get("data", {})}
+    existing_edges = {e["data"]["id"] for e in elements if "source" in e.get("data", {})}
+
+    for e in elements:
+        if e.get("data", {}).get("id") == node_id:
+            e["data"]["expanded"] = True
+
+    new_nodes = []
+    new_edges = []
 
     child_edges = {"HAS_PAGE", "HAS_BODY", "CONTAINS", "ON_PAGE"}
     for ed in store_graph["edges"]:
@@ -713,123 +527,35 @@ def select_node_from_search(node_id, store_revealed, store_graph):
         if mode == "in" and tgt != node_id:
             continue
 
+        if d["id"] in existing_edges:
+            continue
 
-@app.callback(
-    Output("store_revealed", "data", allow_duplicate=True),
-    Output("store_paging", "data", allow_duplicate=True),
-    Input({"type": "expand-group", "node_id": ALL, "direction": ALL, "edge_type": ALL}, "n_clicks"),
-    Input({"type": "collapse-group", "node_id": ALL, "direction": ALL, "edge_type": ALL}, "n_clicks"),
-    State("store_revealed", "data"),
-    State("store_paging", "data"),
-    State("store_adjacency", "data"),
-    State("store_graph", "data"),
-    prevent_initial_call=True,
-)
-def update_group_reveal(_, __, store_revealed, store_paging, adjacency, store_graph):
-    if not store_revealed or not adjacency or not store_graph:
-        return no_update, no_update
+        for nid in (src, tgt):
+            if nid not in existing_nodes and nid in node_index:
+                candidate = node_index[nid]
+                if in_range(candidate.get("data", {}).get("page")):
+                    new_nodes.append(candidate)
 
-    ctx = dash.callback_context
-    if not ctx.triggered_id:
-        return no_update, no_update
+        if not in_range(node_index.get(src, {}).get("data", {}).get("page")):
+            continue
+        if not in_range(node_index.get(tgt, {}).get("data", {}).get("page")):
+            continue
 
-    trigger = ctx.triggered_id
-    node_id = trigger.get("node_id")
-    direction = trigger.get("direction")
-    edge_type = trigger.get("edge_type")
-    if not node_id or not direction or not edge_type:
-        return no_update, no_update
+        new_edges.append(ed)
 
-    revealed_nodes = set(store_revealed.get("nodes", []))
-    revealed_edges = set(store_revealed.get("edges", []))
-    paging = dict(store_paging or {})
-    key = group_key(node_id, direction, edge_type)
-    current_offset = int(paging.get(key, 0))
+    if not new_nodes and not new_edges:
+        return no_update
 
-    if trigger.get("type") == "expand-group":
-        revealed_nodes, revealed_edges, next_offset = expand_group(
-            revealed_nodes,
-            revealed_edges,
-            adjacency.get("out", {}),
-            adjacency.get("in", {}),
-            node_id,
-            direction,
-            edge_type,
-            current_offset,
-            DEFAULT_BATCH_SIZE,
-        )
-        paging[key] = next_offset
-    else:
-        new_offset = max(0, current_offset - DEFAULT_BATCH_SIZE)
-        edges = _group_edges(adjacency, node_id, direction, edge_type)
-        removed_edge_ids = {entry["edge_id"] for entry in edges[new_offset:current_offset]}
-        revealed_edges -= removed_edge_ids
-
-        edge_index = _build_edge_index(store_graph.get("edges", []))
-        remaining_nodes = set(store_revealed.get("core_nodes", []))
-        for edge_id in revealed_edges:
-            data = edge_index.get(edge_id, {}).get("data", {})
-            remaining_nodes.update([data.get("source"), data.get("target")])
-
-        revealed_nodes = {nid for nid in revealed_nodes if nid in remaining_nodes}
-        paging[key] = new_offset
-
-    return (
-        {**store_revealed, "nodes": list(revealed_nodes), "edges": list(revealed_edges)},
-        paging,
-    )
+    return elements + new_nodes + new_edges
 
 
 @app.callback(
-    Output("store_selected", "data", allow_duplicate=True),
-    Output("store_revealed", "data", allow_duplicate=True),
-    Input({"type": "select-node", "node_id": ALL}, "n_clicks"),
-    State("store_revealed", "data"),
-    State("store_graph", "data"),
-    prevent_initial_call=True,
+    Output("graph", "layout"),
+    Input("layout", "value"),
+    Input("scaling_ratio", "value"),
 )
-def select_node_from_inspector(_, store_revealed, store_graph):
-    ctx = dash.callback_context
-    if not ctx.triggered_id or not store_revealed or not store_graph:
-        return no_update, no_update
-    node_id = ctx.triggered_id.get("node_id")
-    if not node_id:
-        return no_update, no_update
-
-    revealed_nodes = set(store_revealed.get("nodes", []))
-    revealed_edges = set(store_revealed.get("edges", []))
-    if node_id not in revealed_nodes:
-        revealed_nodes.add(node_id)
-        edge_index = _build_edge_index(store_graph.get("edges", []))
-        for edge in edge_index.values():
-            data = edge.get("data", {})
-            if node_id in (data.get("source"), data.get("target")):
-                revealed_edges.add(data.get("id"))
-                revealed_nodes.update([data.get("source"), data.get("target")])
-
-    updated_revealed = {**store_revealed, "nodes": list(revealed_nodes), "edges": list(revealed_edges)}
-    return node_id, updated_revealed
-
-
-@app.callback(
-    Output("graph", "stylesheet"),
-    Input("edge_labels", "value"),
-    Input("weight_toggles", "value"),
-    Input("view_toggles", "value"),
-    Input("theme", "value"),
-)
-def update_styles(edge_labels, weight_toggles, view_toggles, theme):
-    weight_toggles = weight_toggles or []
-    return get_cytoscape_stylesheet(
-        theme or DEFAULT_VIEW["theme"],
-        node_size=DEFAULT_VIEW["node_size"],
-        font_size=DEFAULT_VIEW["font_size"],
-        text_max_width=DEFAULT_VIEW["text_max_width"],
-        show_edge_labels="on" in (edge_labels or []),
-        scale_node_size="node" in weight_toggles,
-        scale_edge_width="edge" in weight_toggles,
-        show_arrows="arrows" in (view_toggles or []),
-    )
+def update_layout(name, scaling):
+    return layout_for(name, scaling)
 
 
 @app.callback(
@@ -894,55 +620,7 @@ def filter_elements_by_page(page_range, min_node_weight, min_edge_weight, weight
                     allowed_nodes.add(node_id)
                     filtered_nodes.append(el)
 
-
-@app.callback(
-    Output("legend_container", "children"),
-    Output("legend_container", "style"),
-    Input("theme", "value"),
-)
-def update_legend(theme):
-    tokens = get_theme_tokens(theme or DEFAULT_VIEW["theme"])
-    style = {
-        "backgroundColor": tokens["panel"],
-        "color": tokens["text"],
-        "border": f"1px solid {tokens['panel_border']}",
-    }
-    return build_legend(theme or DEFAULT_VIEW["theme"]), style
-
-
-def _filter_edge_entries(
-    entries,
-    node_index,
-    edge_types,
-    node_types,
-    hide_pages,
-    page_range,
-    min_node_weight,
-    min_edge_weight,
-    direction,
-):
-    filtered = []
-    for entry in entries:
-        edge_type = entry.get("type")
-        if edge_types and edge_type not in edge_types:
-            continue
-        if min_edge_weight is not None and float(entry.get("weight") or 0) < min_edge_weight:
-            continue
-        neighbor_id = entry.get("target") if direction == "out" else entry.get("source")
-        neighbor = node_index.get(neighbor_id, {})
-        data = neighbor.get("data", {})
-        node_type = data.get("type")
-        if node_types and node_type not in node_types:
-            continue
-        if hide_pages and node_type == "Page":
-            continue
-        if page_range and data.get("page") is not None:
-            if not (page_range[0] <= data.get("page") <= page_range[1]):
-                continue
-        if min_node_weight is not None and float(data.get("weight") or 0) < min_node_weight:
-            continue
-        filtered.append({**entry, "neighbor_id": neighbor_id})
-    return filtered
+    return filtered_nodes + filtered_edges
 
 
 @app.callback(
