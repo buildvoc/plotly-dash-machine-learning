@@ -366,9 +366,6 @@ def _apply_weights(nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]]) -> 
         data = node["data"]
         weight = float(data.get("weight") or 1)
         data["size"] = _clamp(20 + (weight * 6), 20, 80)
-        colors = get_node_colors(data.get("type"))
-        data["color_light"] = colors["light"]
-        data["color_dark"] = colors["dark"]
 
 
 # -----------------------------

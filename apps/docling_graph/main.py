@@ -102,10 +102,55 @@ def layout_for(name: str, scaling_ratio: int):
     return {"name": name, "fit": True, "padding": 30}
 
 
-GRAPH_BASE_STYLE = {
-    "width": "100%",
-    "height": "85vh",
-}
+def base_stylesheet(
+    node_size,
+    font_size,
+    text_max_width,
+    show_edge_labels,
+    scale_node_size,
+    scale_edge_width,
+):
+    node_width = "data(size)" if scale_node_size else f"{node_size}px"
+    node_height = "data(size)" if scale_node_size else f"{node_size}px"
+    edge_width = "data(width)" if scale_edge_width else 1.5
+    return [
+        {
+            "selector": "node",
+            "style": {
+                "label": "data(label)",
+                "font-size": f"{font_size}px",
+                "text-wrap": "wrap",
+                "text-max-width": f"{text_max_width}px",
+                "color": "#E5E7EB",
+                "text-outline-width": 1,
+                "text-outline-color": "#0B1220",
+                "width": node_width,
+                "height": node_height,
+                "z-index": 9999,
+            },
+        },
+        {
+            "selector": "edge",
+            "style": {
+                "curve-style": "bezier",
+                "line-color": "#64748B",
+                "target-arrow-color": "#64748B",
+                "target-arrow-shape": "triangle",
+                "arrow-scale": 0.8,
+                "opacity": 0.55,
+                "label": "data(rel)" if show_edge_labels else "",
+                "font-size": "9px",
+                "color": "#CBD5E1",
+                "width": edge_width,
+                "z-index": 5000,
+            },
+        },
+        {"selector": ".document", "style": {"background-color": "#1D4ED8"}},
+        {"selector": ".body", "style": {"background-color": "#0EA5E9"}},
+        {"selector": ".page", "style": {"background-color": "#111827"}},
+        {"selector": ".text", "style": {"background-color": "#334155"}},
+        {"selector": ":selected", "style": {"border-width": 3, "border-color": "#FBBF24"}},
+    ]
 
 
 # -------------------------------------------------
@@ -120,7 +165,6 @@ DEFAULT_VIEW = {
     "font_size": 10,
     "text_max_width": 520,
     "show_edge_labels": False,
-    "theme": "dark",
     "scale_node_size": True,
     "scale_edge_width": True,
     "min_node_weight": 1,
@@ -165,14 +209,13 @@ app.layout = html.Div(
                                 DEFAULT_VIEW["layout"],
                                 DEFAULT_VIEW["scaling_ratio"],
                             ),
-                            stylesheet=get_cytoscape_stylesheet(
-                                DEFAULT_VIEW["theme"],
-                                node_size=DEFAULT_VIEW["node_size"],
-                                font_size=DEFAULT_VIEW["font_size"],
-                                text_max_width=DEFAULT_VIEW["text_max_width"],
-                                show_edge_labels=DEFAULT_VIEW["show_edge_labels"],
-                                scale_node_size=DEFAULT_VIEW["scale_node_size"],
-                                scale_edge_width=DEFAULT_VIEW["scale_edge_width"],
+                            stylesheet=base_stylesheet(
+                                DEFAULT_VIEW["node_size"],
+                                DEFAULT_VIEW["font_size"],
+                                DEFAULT_VIEW["text_max_width"],
+                                DEFAULT_VIEW["show_edge_labels"],
+                                DEFAULT_VIEW["scale_node_size"],
+                                DEFAULT_VIEW["scale_edge_width"],
                             ),
                             elements=[],
                         )
@@ -365,11 +408,6 @@ app.layout = html.Div(
                                                         html.Pre(id="hover-node-output", style={"whiteSpace": "pre-wrap"}),
                                                         html.Pre(id="hover-edge-output", style={"whiteSpace": "pre-wrap"}),
                                                     ],
-                                                ),
-                                                html.Details(
-                                                    id="legend_container",
-                                                    open=True,
-                                                    children=[],
                                                 ),
                                             ],
                                         )
@@ -609,18 +647,16 @@ def filter_elements_by_page(page_range, min_node_weight, min_edge_weight, weight
     Output("graph", "stylesheet"),
     Input("edge_labels", "value"),
     Input("weight_toggles", "value"),
-    Input("theme", "value"),
 )
-def update_styles(edge_labels, weight_toggles, theme):
+def update_styles(edge_labels, weight_toggles):
     weight_toggles = weight_toggles or []
-    return get_cytoscape_stylesheet(
-        theme or DEFAULT_VIEW["theme"],
-        node_size=DEFAULT_VIEW["node_size"],
-        font_size=DEFAULT_VIEW["font_size"],
-        text_max_width=DEFAULT_VIEW["text_max_width"],
-        show_edge_labels="on" in (edge_labels or []),
-        scale_node_size="node" in weight_toggles,
-        scale_edge_width="edge" in weight_toggles,
+    return base_stylesheet(
+        DEFAULT_VIEW["node_size"],
+        DEFAULT_VIEW["font_size"],
+        DEFAULT_VIEW["text_max_width"],
+        "on" in (edge_labels or []),
+        "node" in weight_toggles,
+        "edge" in weight_toggles,
     )
 
 
