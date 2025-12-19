@@ -11,6 +11,7 @@ from pathlib import Path
 import math
 from typing import Any, Dict, List, Optional, Tuple
 
+from .theme import get_node_colors
 
 DOCLING_JSON_ROOT = "/home/hp/docling-ws/data/docling"
 

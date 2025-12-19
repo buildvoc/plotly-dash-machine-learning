@@ -9,10 +9,15 @@ from xml.sax.saxutils import escape
 from dash import Dash, html, dcc, Input, Output, State, no_update
 import dash_cytoscape as cyto
 
-from .graph_builder import (
-    build_graph_from_docling_json,
-    list_docling_files,
-    GraphPayload,
+from .graph_builder import build_graph_from_docling_json, list_docling_files, GraphPayload
+from .theme import (
+    get_cytoscape_stylesheet,
+    get_edge_colors,
+    get_edge_style,
+    get_edge_legend_items,
+    get_node_colors,
+    get_node_legend_items,
+    get_theme_tokens,
 )
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -194,9 +199,8 @@ app.layout = html.Div(
                         cyto.Cytoscape(
                             id="graph",
                             style={
-                                "width": "100%",
-                                "height": "85vh",
-                                "backgroundColor": "#0B0F17",
+                                **GRAPH_BASE_STYLE,
+                                "backgroundColor": get_theme_tokens(DEFAULT_VIEW["theme"])["background"],
                             },
                             wheelSensitivity=0.01,
                             minZoom=0.25,
@@ -285,6 +289,22 @@ app.layout = html.Div(
                                                             options=[{"label": l, "value": v} for l, v in LAYOUTS],
                                                             value=DEFAULT_VIEW["layout"],
                                                             clearable=False,
+                                                        ),
+                                                    ],
+                                                ),
+                                                html.Div(
+                                                    className="control-section",
+                                                    children=[
+                                                        html.Div("Theme", className="control-label"),
+                                                        dcc.RadioItems(
+                                                            id="theme",
+                                                            options=[
+                                                                {"label": "Light", "value": "light"},
+                                                                {"label": "Dark", "value": "dark"},
+                                                            ],
+                                                            value=DEFAULT_VIEW["theme"],
+                                                            inputClassName="control-radio",
+                                                            labelClassName="control-radio__label",
                                                         ),
                                                     ],
                                                 ),
@@ -638,6 +658,83 @@ def update_styles(edge_labels, weight_toggles):
         "node" in weight_toggles,
         "edge" in weight_toggles,
     )
+
+
+@app.callback(
+    Output("graph", "style"),
+    Input("theme", "value"),
+)
+def update_graph_style(theme):
+    tokens = get_theme_tokens(theme or DEFAULT_VIEW["theme"])
+    return {
+        **GRAPH_BASE_STYLE,
+        "backgroundColor": tokens["background"],
+    }
+
+
+def build_legend(theme: str):
+    tokens = get_theme_tokens(theme)
+    node_items = []
+    for item in get_node_legend_items():
+        colors = get_node_colors(item["type"])
+        node_items.append(
+            html.Div(
+                className="legend-row",
+                children=[
+                    html.Span(className="legend-swatch", style={"backgroundColor": colors[theme]}),
+                    html.Span(item["label"], className="legend-label"),
+                ],
+            )
+        )
+
+    edge_items = []
+    for item in get_edge_legend_items():
+        colors = get_edge_colors(item["type"])
+        edge_style = get_edge_style(item["type"])
+        edge_items.append(
+            html.Div(
+                className="legend-row",
+                children=[
+                    html.Span(
+                        className="legend-line",
+                        style={
+                            "borderColor": colors[theme],
+                            "borderStyle": edge_style.get("line-style", "solid"),
+                            "borderWidth": "3px" if edge_style.get("thick") else "2px",
+                        },
+                    ),
+                    html.Span(item["label"], className="legend-label"),
+                ],
+            )
+        )
+
+    return [
+        html.Summary("Legend", className="legend-summary"),
+        html.Div(
+            className="legend-body",
+            children=[
+                html.Div("Node Types", className="legend-title"),
+                html.Div(node_items, className="legend-list"),
+                html.Div("Edge Types", className="legend-title"),
+                html.Div(edge_items, className="legend-list"),
+            ],
+        ),
+    ]
+
+
+@app.callback(
+    Output("legend_container", "children"),
+    Output("legend_container", "style"),
+    Input("theme", "value"),
+)
+def update_legend(theme):
+    tokens = get_theme_tokens(theme or DEFAULT_VIEW["theme"])
+    style = {
+        "backgroundColor": tokens["panel"],
+        "color": tokens["text"],
+        "border": f"1px solid {tokens['panel_border']}",
+    }
+    return build_legend(theme or DEFAULT_VIEW["theme"]), style
 
 
 @app.callback(
