@@ -8,8 +8,10 @@ import unittest
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
+from .theme import get_node_colors
 
 DOCLING_JSON_ROOT = "/home/hp/docling-ws/data/docling"
 
@@ -130,6 +132,7 @@ def build_graph_from_docling_json(path: str) -> GraphPayload:
     edges: List[Dict[str, Any]] = []
 
     doc_id = _nid(path)
+    body_id = _nid(f"{path}::body")
     doc_name = os.path.basename(path)
 
     # DOCUMENT node
@@ -137,12 +140,42 @@ def build_graph_from_docling_json(path: str) -> GraphPayload:
         {
             "data": {
                 "id": doc_id,
-                "type": "document",
+                "type": "Document",
+                "name": doc_name,
+                "description": f"Document: {doc_name}",
                 "label_short": f"DOCUMENT: {doc_name}",
                 "label_full": f"DOCUMENT: {doc_name}",
                 "label": f"DOCUMENT: {doc_name}",
             },
             "classes": "document",
+        }
+    )
+
+    nodes.append(
+        {
+            "data": {
+                "id": body_id,
+                "type": "Body",
+                "name": "Body",
+                "description": "Document body",
+                "label_short": "BODY",
+                "label_full": "BODY",
+                "label": "BODY",
+            },
+            "classes": "body",
+        }
+    )
+
+    edges.append(
+        {
+            "data": {
+                "id": _nid(f"{doc_id}__{body_id}__HAS_BODY"),
+                "source": doc_id,
+                "target": body_id,
+                "rel": "HAS_BODY",
+                "type": "HAS_BODY",
+            },
+            "classes": "has-body",
         }
     )
 
@@ -156,29 +189,33 @@ def build_graph_from_docling_json(path: str) -> GraphPayload:
             {
                 "data": {
                     "id": page_id,
-                    "type": "chunk",
+                    "type": "Page",
+                    "name": f"Page {page_no}",
+                    "description": f"Page {page_no}",
                     "page": page_no,
                     "label_short": f"PAGE {page_no}",
                     "label_full": f"PAGE {page_no}",
                     "label": f"PAGE {page_no}",
                 },
-                "classes": "section",
+                "classes": "page",
             }
         )
 
         edges.append(
             {
                 "data": {
-                    "id": _nid(f"{doc_id}__{page_id}"),
+                    "id": _nid(f"{doc_id}__{page_id}__HAS_PAGE"),
                     "source": doc_id,
                     "target": page_id,
-                    "rel": "hier",
+                    "rel": "HAS_PAGE",
+                    "type": "HAS_PAGE",
                 },
-                "classes": "hier",
+                "classes": "has-page",
             }
         )
 
         page_texts = pages[page_no][:MAX_TEXTS_PER_PAGE]
+        previous_text_id: Optional[str] = None
 
         for t in page_texts:
             ref = t.get("self_ref") or t.get("id") or repr(t)
@@ -196,7 +233,9 @@ def build_graph_from_docling_json(path: str) -> GraphPayload:
                 {
                     "data": {
                         "id": text_id,
-                        "type": "text",
+                        "type": dtype,
+                        "name": _short(raw_text, 140),
+                        "description": _short(raw_text, 240),
                         "content_layer": content_layer,
                         "text": raw_text,
                         "page": page_no,
@@ -205,23 +244,303 @@ def build_graph_from_docling_json(path: str) -> GraphPayload:
                         "label_full": label_full,
                         "label": label_full,
                     },
-                    "classes": "item",
+                    "classes": "text",
                 }
             )
 
             edges.append(
                 {
                     "data": {
-                        "id": _nid(f"{page_id}__{text_id}"),
-                        "source": page_id,
+                        "id": _nid(f"{body_id}__{text_id}__CONTAINS"),
+                        "source": body_id,
                         "target": text_id,
-                        "rel": "hier",
+                        "rel": "CONTAINS",
+                        "type": "CONTAINS",
                     },
-                    "classes": "hier",
+                    "classes": "contains",
                 }
             )
 
+            edges.append(
+                {
+                    "data": {
+                        "id": _nid(f"{page_id}__{text_id}__ON_PAGE"),
+                        "source": page_id,
+                        "target": text_id,
+                        "rel": "ON_PAGE",
+                        "type": "ON_PAGE",
+                    },
+                    "classes": "on-page",
+                }
+            )
+
+            if previous_text_id:
+                edges.append(
+                    {
+                        "data": {
+                            "id": _nid(f"{previous_text_id}__{text_id}__NEXT"),
+                            "source": previous_text_id,
+                            "target": text_id,
+                            "rel": "NEXT",
+                            "type": "NEXT",
+                        },
+                        "classes": "next",
+                    }
+                )
+
+            previous_text_id = text_id
+
+    _apply_weights(nodes, edges)
+
     return GraphPayload(nodes=nodes, edges=edges)
+
+
+def _clamp(value: float, minimum: float, maximum: float) -> float:
+    return max(minimum, min(value, maximum))
+
+
+def _edge_weight(rel: str, target_node: Dict[str, Any]) -> float:
+    if rel == "CONTAINS":
+        text = str(target_node.get("data", {}).get("text") or "")
+        if text:
+            return _clamp(math.ceil(len(text) / 200), 1, 10)
+        return 1
+    return 1
+
+
+def _apply_weights(nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]]) -> None:
+    node_index = {n["data"]["id"]: n for n in nodes}
+
+    for edge in edges:
+        data = edge["data"]
+        source = node_index.get(data.get("source"), {}).get("data", {})
+        target = node_index.get(data.get("target"), {}).get("data", {})
+        weight = _edge_weight(data.get("rel"), target or {})
+        data["weight"] = weight
+        data["width"] = _clamp(1 + (weight * 0.5), 1, 8)
+        data["edge_length"] = _clamp(120 - (weight * 8), 30, 200)
+        data["source_name"] = source.get("name")
+        data["source_type"] = source.get("type")
+        data["target_name"] = target.get("name")
+        data["target_type"] = target.get("type")
+
+    child_edges = {"HAS_PAGE", "HAS_BODY", "CONTAINS", "ON_PAGE"}
+    children_count: Dict[str, int] = {}
+    degree: Dict[str, int] = {}
+
+    for edge in edges:
+        src = edge["data"].get("source")
+        tgt = edge["data"].get("target")
+        rel = edge["data"].get("rel")
+        degree[src] = degree.get(src, 0) + 1
+        degree[tgt] = degree.get(tgt, 0) + 1
+        if rel in child_edges:
+            children_count[src] = children_count.get(src, 0) + 1
+
+    for node in nodes:
+        data = node["data"]
+        node_id = data["id"]
+        text = str(data.get("text") or "")
+        text_len = len(text)
+        count_children = children_count.get(node_id, 0)
+        deg = degree.get(node_id, 0)
+        content = min(5, text_len / 500) if text else 0
+        connectivity = min(5, math.log1p(deg))
+        weight = 1 + (count_children * 0.25) + content + connectivity
+        data["text_length"] = text_len
+        data["children_count"] = count_children
+        data["degree"] = deg
+        data["weight"] = weight
+
+    for node in nodes:
+        data = node["data"]
+        if data.get("type") not in {"Document", "Body"}:
+            continue
+        node_id = data["id"]
+        child_weights = [
+            node_index[edge["data"]["target"]]["data"]["weight"]
+            for edge in edges
+            if edge["data"].get("source") == node_id
+        ]
+        if child_weights:
+            top_weights = sorted(child_weights, reverse=True)[:5]
+            data["weight"] = max(top_weights) + 1
+
+    for node in nodes:
+        data = node["data"]
+        weight = float(data.get("weight") or 1)
+        data["size"] = _clamp(20 + (weight * 6), 20, 80)
+        colors = get_node_colors(data.get("type"))
+        data["color_light"] = colors["light"]
+        data["color_dark"] = colors["dark"]
+
+
+def build_adjacency_indexes(
+    edges: List[Dict[str, Any]],
+) -> Tuple[Dict[str, Dict[str, List[Dict[str, Any]]]], Dict[str, Dict[str, List[Dict[str, Any]]]]]:
+    out_index: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+    in_index: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+
+    for edge in edges:
+        data = edge.get("data", {})
+        source = data.get("source")
+        target = data.get("target")
+        edge_type = data.get("rel") or data.get("type")
+        if not source or not target or not edge_type:
+            continue
+        entry = {
+            "edge_id": data.get("id"),
+            "source": source,
+            "target": target,
+            "type": edge_type,
+            "weight": data.get("weight", 1),
+        }
+        out_index.setdefault(source, {}).setdefault(edge_type, []).append(entry)
+        in_index.setdefault(target, {}).setdefault(edge_type, []).append(entry)
+
+    return out_index, in_index
+
+
+def group_key(node_id: str, direction: str, edge_type: str) -> str:
+    return f"{node_id}::{direction}::{edge_type}"
+
+
+def initial_reveal(
+    node_index: Dict[str, Dict[str, Any]],
+    out_index: Dict[str, Dict[str, List[Dict[str, Any]]]],
+    batch_size: int,
+) -> Tuple[set[str], set[str], Dict[str, int], set[str]]:
+    revealed_nodes: set[str] = set()
+    revealed_edges: set[str] = set()
+    paging: Dict[str, int] = {}
+    core_nodes: set[str] = set()
+
+    def add_edges(source_id: str, edge_type: str, limit: Optional[int] = None) -> int:
+        edges = out_index.get(source_id, {}).get(edge_type, [])
+        if limit is not None:
+            edges = edges[:limit]
+        for entry in edges:
+            revealed_edges.add(entry["edge_id"])
+            revealed_nodes.add(entry["target"])
+        return len(edges)
+
+    document = next((n for n in node_index.values() if n["data"].get("type") == "Document"), None)
+    body = next((n for n in node_index.values() if n["data"].get("type") == "Body"), None)
+    pages = [n for n in node_index.values() if n["data"].get("type") == "Page"]
+
+    for node in (document, body):
+        if node:
+            node_id = node["data"]["id"]
+            revealed_nodes.add(node_id)
+            core_nodes.add(node_id)
+
+    for page in pages:
+        page_id = page["data"]["id"]
+        revealed_nodes.add(page_id)
+        core_nodes.add(page_id)
+
+    if document:
+        count = add_edges(document["data"]["id"], "HAS_BODY")
+        paging[group_key(document["data"]["id"], "out", "HAS_BODY")] = count
+        count = add_edges(document["data"]["id"], "HAS_PAGE")
+        paging[group_key(document["data"]["id"], "out", "HAS_PAGE")] = count
+
+    if body:
+        count = add_edges(body["data"]["id"], "CONTAINS", batch_size)
+        paging[group_key(body["data"]["id"], "out", "CONTAINS")] = count
+
+    return revealed_nodes, revealed_edges, paging, core_nodes
+
+
+def expand_group(
+    revealed_nodes: set[str],
+    revealed_edges: set[str],
+    out_index: Dict[str, Dict[str, List[Dict[str, Any]]]],
+    in_index: Dict[str, Dict[str, List[Dict[str, Any]]]],
+    node_id: str,
+    direction: str,
+    edge_type: str,
+    offset: int,
+    batch_size: int,
+) -> Tuple[set[str], set[str], int]:
+    edges = out_index.get(node_id, {}).get(edge_type, []) if direction == "out" else in_index.get(node_id, {}).get(edge_type, [])
+    batch = edges[offset : offset + batch_size]
+    for entry in batch:
+        revealed_edges.add(entry["edge_id"])
+        neighbor = entry["target"] if direction == "out" else entry["source"]
+        revealed_nodes.add(neighbor)
+    next_offset = min(offset + batch_size, len(edges))
+    return revealed_nodes, revealed_edges, next_offset
+
+
+def filter_revealed(
+    revealed_node_ids: set[str],
+    revealed_edge_ids: set[str],
+    node_index: Dict[str, Dict[str, Any]],
+    edge_index: Dict[str, Dict[str, Any]],
+    *,
+    node_types: Optional[set[str]] = None,
+    edge_types: Optional[set[str]] = None,
+    hide_pages: bool = False,
+    hide_isolated: bool = False,
+    page_range: Optional[Tuple[int, int]] = None,
+    min_node_weight: Optional[float] = None,
+    min_edge_weight: Optional[float] = None,
+    keep_context: bool = False,
+) -> Tuple[set[str], set[str]]:
+    allowed_nodes: set[str] = set()
+
+    for node_id in revealed_node_ids:
+        node = node_index.get(node_id, {})
+        data = node.get("data", {})
+        node_type = data.get("type")
+        if node_types and node_type not in node_types:
+            continue
+        if hide_pages and node_type == "Page":
+            continue
+        if page_range and data.get("page") is not None:
+            if not (page_range[0] <= data.get("page") <= page_range[1]):
+                continue
+        if min_node_weight is not None and float(data.get("weight") or 0) < min_node_weight:
+            continue
+        allowed_nodes.add(node_id)
+
+    allowed_edges: set[str] = set()
+    context_nodes: set[str] = set()
+    for edge_id in revealed_edge_ids:
+        edge = edge_index.get(edge_id, {})
+        data = edge.get("data", {})
+        edge_type = data.get("rel") or data.get("type")
+        if edge_types and edge_type not in edge_types:
+            continue
+        if min_edge_weight is not None and float(data.get("weight") or 0) < min_edge_weight:
+            continue
+        source = data.get("source")
+        target = data.get("target")
+        if source in allowed_nodes and target in allowed_nodes:
+            allowed_edges.add(edge_id)
+        elif keep_context and (source in allowed_nodes or target in allowed_nodes):
+            allowed_edges.add(edge_id)
+            context_nodes.update([source, target])
+
+    if keep_context and context_nodes:
+        allowed_nodes.update(context_nodes)
+
+    if hide_isolated:
+        connected_nodes = set()
+        for edge_id in allowed_edges:
+            edge = edge_index.get(edge_id, {})
+            data = edge.get("data", {})
+            connected_nodes.update([data.get("source"), data.get("target")])
+        allowed_nodes = {node_id for node_id in allowed_nodes if node_id in connected_nodes}
+        allowed_edges = {
+            edge_id
+            for edge_id in allowed_edges
+            if edge_index.get(edge_id, {}).get("data", {}).get("source") in allowed_nodes
+            and edge_index.get(edge_id, {}).get("data", {}).get("target") in allowed_nodes
+        }
+
+    return allowed_nodes, allowed_edges
 
 
 # -----------------------------
@@ -270,19 +589,24 @@ class GraphBuilderTests(unittest.TestCase):
         finally:
             Path(tmp_path).unlink(missing_ok=True)
 
-        self.assertEqual(len(payload.nodes), 3)
-        self.assertEqual(len(payload.edges), 2)
+        self.assertEqual(len(payload.nodes), 4)
+        self.assertEqual(len(payload.edges), 4)
 
         node_ids = {n["data"]["id"] for n in payload.nodes}
         edge_pairs = {(e["data"]["source"], e["data"]["target"]) for e in payload.edges}
 
         doc_id = _nid(tmp_path)
+        body_id = _nid(f"{tmp_path}::body")
         page_id = _nid(f"{tmp_path}::page::1")
-        text_id = next(n["data"]["id"] for n in payload.nodes if n["data"]["type"] == "text")
+        text_id = next(n["data"]["id"] for n in payload.nodes if n["data"].get("text"))
 
         self.assertIn(doc_id, node_ids)
+        self.assertIn(body_id, node_ids)
         self.assertIn(page_id, node_ids)
-        self.assertEqual(edge_pairs, {(doc_id, page_id), (page_id, text_id)})
+        self.assertEqual(
+            edge_pairs,
+            {(doc_id, body_id), (doc_id, page_id), (body_id, text_id), (page_id, text_id)},
+        )
 
     def test_list_docling_files_accepts_custom_root(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -297,6 +621,74 @@ class GraphBuilderTests(unittest.TestCase):
             results = list_docling_files(str(tmpdir))
 
         self.assertEqual(results, sorted([str(first), str(second)]))
+
+    def test_build_adjacency_indexes_and_expand_group(self):
+        edges = [
+            {"data": {"id": "e1", "source": "a", "target": "b", "rel": "CONTAINS"}},
+            {"data": {"id": "e2", "source": "a", "target": "c", "rel": "CONTAINS"}},
+            {"data": {"id": "e3", "source": "x", "target": "a", "rel": "HAS_BODY"}},
+        ]
+        out_index, in_index = build_adjacency_indexes(edges)
+        self.assertEqual(len(out_index["a"]["CONTAINS"]), 2)
+        self.assertEqual(len(in_index["a"]["HAS_BODY"]), 1)
+
+        revealed_nodes = {"a"}
+        revealed_edges = set()
+        revealed_nodes, revealed_edges, next_offset = expand_group(
+            revealed_nodes,
+            revealed_edges,
+            out_index,
+            in_index,
+            "a",
+            "out",
+            "CONTAINS",
+            0,
+            1,
+        )
+        self.assertEqual(next_offset, 1)
+        self.assertIn("b", revealed_nodes)
+        self.assertIn("e1", revealed_edges)
+
+    def test_initial_reveal_sets_paging(self):
+        node_index = {
+            "doc": {"data": {"id": "doc", "type": "Document"}},
+            "body": {"data": {"id": "body", "type": "Body"}},
+            "p1": {"data": {"id": "p1", "type": "Page"}},
+            "t1": {"data": {"id": "t1", "type": "PARAGRAPH"}},
+        }
+        edges = [
+            {"data": {"id": "e1", "source": "doc", "target": "body", "rel": "HAS_BODY"}},
+            {"data": {"id": "e2", "source": "doc", "target": "p1", "rel": "HAS_PAGE"}},
+            {"data": {"id": "e3", "source": "body", "target": "t1", "rel": "CONTAINS"}},
+        ]
+        out_index, _ = build_adjacency_indexes(edges)
+        revealed_nodes, revealed_edges, paging, core_nodes = initial_reveal(node_index, out_index, 10)
+        self.assertIn("doc", revealed_nodes)
+        self.assertIn("body", revealed_nodes)
+        self.assertIn("p1", revealed_nodes)
+        self.assertIn("e1", revealed_edges)
+        self.assertIn("e2", revealed_edges)
+        self.assertIn("body", core_nodes)
+        self.assertEqual(paging.get(group_key("body", "out", "CONTAINS")), 1)
+
+    def test_filter_revealed_respects_types(self):
+        node_index = {
+            "a": {"data": {"id": "a", "type": "Document"}},
+            "b": {"data": {"id": "b", "type": "Page"}},
+        }
+        edge_index = {
+            "e1": {"data": {"id": "e1", "source": "a", "target": "b", "rel": "HAS_PAGE"}},
+        }
+        nodes, edges = filter_revealed(
+            {"a", "b"},
+            {"e1"},
+            node_index,
+            edge_index,
+            node_types={"Document"},
+            edge_types={"HAS_PAGE"},
+        )
+        self.assertEqual(nodes, {"a"})
+        self.assertEqual(edges, set())
 
 
 if __name__ == "__main__":
