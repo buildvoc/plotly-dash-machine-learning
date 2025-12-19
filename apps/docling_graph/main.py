@@ -16,7 +16,6 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Enable stable extra layouts
 try:
     cyto.load_extra_layouts()
 except Exception:
@@ -534,11 +533,7 @@ app.layout = html.Div(
                                         {"label": " Scale node size", "value": "scale_node"},
                                         {"label": " Scale edge width", "value": "scale_edge"},
                                     ],
-                                    value=[
-                                        "arrows",
-                                        "scale_node",
-                                        "scale_edge",
-                                    ],
+                                    value=["arrows", "scale_node", "scale_edge"],
                                     inputClassName="control-checkbox",
                                     labelClassName="control-checkbox__label",
                                 )
@@ -592,10 +587,7 @@ app.layout = html.Div(
                             wheelSensitivity=0.01,
                             minZoom=0.25,
                             maxZoom=2.0,
-                            layout=layout_for(
-                                DEFAULT_VIEW["layout"],
-                                DEFAULT_VIEW["scaling_ratio"],
-                            ),
+                            layout=layout_for(DEFAULT_VIEW["layout"], DEFAULT_VIEW["scaling_ratio"]),
                             stylesheet=safe_base_stylesheet(
                                 DEFAULT_THEME,
                                 DEFAULT_VIEW["scale_node_size"],
@@ -643,19 +635,25 @@ def load_graph(path):
         return [], None, None
 
     graph = build_graph_from_docling_json(path)
-    node_types = sorted({n["data"].get("type", "") for n in graph.nodes})
-    edge_types = sorted({e["data"].get("type", "") for e in graph.edges})
+
+    node_types = sorted({n["data"].get("type", "") for n in graph.nodes if n.get("data")})
+    edge_types = sorted({e["data"].get("type", "") for e in graph.edges if e.get("data")})
     search_options = [
         {"label": n["data"].get("label"), "value": n["data"].get("id")}
         for n in graph.nodes
+        if n.get("data")
     ]
+
     metadata = {
         "node_types": node_types,
         "edge_types": edge_types,
         "search_options": search_options,
     }
     store_graph = {"nodes": graph.nodes, "edges": graph.edges}
-    return [], store_graph, metadata
+
+    # ✅ IMPORTANT: return initial elements so the graph isn't blank on load
+    initial_nodes, initial_edges = apply_theme_to_elements(graph.nodes, graph.edges, DEFAULT_THEME)
+    return (initial_nodes + initial_edges), store_graph, metadata
 
 
 @app.callback(
@@ -683,7 +681,7 @@ def update_filters(metadata):
     Input("min_edge_weight", "value"),
     Input("store_theme", "data"),
     Input("store_highlight", "data"),
-    prevent_initial_call=False,
+    prevent_initial_call="initial_duplicate",
 )
 def apply_filters(
     graph,
@@ -716,6 +714,9 @@ def apply_filters(
 
     themed_nodes, themed_edges = apply_theme_to_elements(nodes, edges, theme or DEFAULT_THEME)
     themed_nodes, themed_edges = _apply_highlight(themed_nodes, themed_edges, highlight_ids)
+
+    # ✅ one-line debug that tells you instantly if you're filtering everything out
+    logger.info("FILTERED GRAPH: nodes=%s edges=%s", len(themed_nodes), len(themed_edges))
 
     filtered_graph = {"nodes": themed_nodes, "edges": themed_edges}
     return themed_nodes + themed_edges, filtered_graph
@@ -800,7 +801,7 @@ def render_inspector(filtered_graph, selected_node_id, expansion_state):
         footer = None
         if shown < total:
             footer = html.Button(
-                f"Show more (+25)",
+                "Show more (+25)",
                 id={"type": "expand-group", "group": group_key},
                 className="btn-small",
             )
@@ -809,10 +810,7 @@ def render_inspector(filtered_graph, selected_node_id, expansion_state):
             html.Div(
                 className="inspector-group",
                 children=[
-                    html.Div(
-                        f"{direction} → {edge_type} ({total})",
-                        className="inspector-group-title",
-                    ),
+                    html.Div(f"{direction} → {edge_type} ({total})", className="inspector-group-title"),
                     html.Div(connections, className="inspector-list"),
                     footer,
                 ],
@@ -842,13 +840,7 @@ def render_inspector(filtered_graph, selected_node_id, expansion_state):
     State("store_selected_node", "data"),
     prevent_initial_call=True,
 )
-def update_expansion(
-    _clicks,
-    reset_clicks,
-    expansion_state,
-    filtered_graph,
-    selected_node_id,
-):
+def update_expansion(_clicks, reset_clicks, expansion_state, filtered_graph, selected_node_id):
     if ctx.triggered_id == "reset_highlight":
         return {}, []
 
@@ -869,11 +861,12 @@ def update_expansion(
     return expansion_state, highlight_ids
 
 
+# ✅ FIXED: reset_view outputs were broken (duplicate Output + wrong return length)
 @app.callback(
-    Output("graph", "elements", allow_duplicate=True),
     Output("graph", "elements", allow_duplicate=True),
     Output("store_selected_node", "data", allow_duplicate=True),
     Output("store_highlight", "data", allow_duplicate=True),
+    Output("store_inspector_expansion", "data", allow_duplicate=True),
     Input("reset_view", "n_clicks"),
     State("store_filtered_graph", "data"),
     State("store_theme", "data"),
@@ -881,11 +874,11 @@ def update_expansion(
 )
 def reset_view(_n_clicks, filtered_graph, theme):
     if not filtered_graph:
-        return no_update, no_update, no_update
+        return no_update, no_update, no_update, no_update
     nodes = filtered_graph.get("nodes", [])
     edges = filtered_graph.get("edges", [])
     themed_nodes, themed_edges = apply_theme_to_elements(nodes, edges, theme or DEFAULT_THEME)
-    return themed_nodes + themed_edges, None, []
+    return themed_nodes + themed_edges, None, [], {}
 
 
 @app.callback(
@@ -930,8 +923,5 @@ def show_edge(data):
     return json.dumps(data, indent=2)
 
 
-# -------------------------------------------------
-# Run
-# -------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8050)
