@@ -2,10 +2,6 @@ from __future__ import annotations
 
 import os
 import json
-import csv
-import io
-import zipfile
-from xml.sax.saxutils import escape
 from dash import Dash, html, dcc, Input, Output, State, no_update
 import dash_cytoscape as cyto
 
@@ -49,7 +45,6 @@ LAYOUTS = [
     ("Breadthfirst", "breadthfirst"),
     ("Force-directed (COSE)", "cose"),
     ("COSE-Bilkent", "cose-bilkent"),
-    ("fCoSE", "fcose"),
     ("Cola (read text)", "cola"),
     ("Euler (quality force)", "euler"),
 ]
@@ -81,12 +76,12 @@ def layout_for(name: str, scaling_ratio: int):
             "padding": 30,
         }
 
-    if name in ("cose", "cose-bilkent", "euler", "fcose"):
+    if name in ("cose", "cose-bilkent", "euler"):
         return {
             "name": name,
             "animate": True,
             "randomize": False,
-            "idealEdgeLength": "data(edge_length)" if name in ("cose-bilkent", "fcose") else int(60 + (s * 0.25)),
+            "idealEdgeLength": int(60 + (s * 0.25)),
             "nodeRepulsion": int(2000 + (s * 12)),
             "gravity": 0.25,
             "numIter": 1000,
@@ -97,17 +92,7 @@ def layout_for(name: str, scaling_ratio: int):
     return {"name": name, "fit": True, "padding": 30}
 
 
-def base_stylesheet(
-    node_size,
-    font_size,
-    text_max_width,
-    show_edge_labels,
-    scale_node_size,
-    scale_edge_width,
-):
-    node_width = "data(size)" if scale_node_size else f"{node_size}px"
-    node_height = "data(size)" if scale_node_size else f"{node_size}px"
-    edge_width = "data(width)" if scale_edge_width else 1.5
+def base_stylesheet(node_size, font_size, text_max_width, show_edge_labels):
     return [
         {
             "selector": "node",
@@ -119,8 +104,8 @@ def base_stylesheet(
                 "color": "#E5E7EB",
                 "text-outline-width": 1,
                 "text-outline-color": "#0B1220",
-                "width": node_width,
-                "height": node_height,
+                "width": f"{node_size}px",
+                "height": f"{node_size}px",
                 "z-index": 9999,
             },
         },
@@ -136,14 +121,12 @@ def base_stylesheet(
                 "label": "data(rel)" if show_edge_labels else "",
                 "font-size": "9px",
                 "color": "#CBD5E1",
-                "width": edge_width,
                 "z-index": 5000,
             },
         },
         {"selector": ".document", "style": {"background-color": "#1D4ED8"}},
-        {"selector": ".body", "style": {"background-color": "#0EA5E9"}},
-        {"selector": ".page", "style": {"background-color": "#111827"}},
-        {"selector": ".text", "style": {"background-color": "#334155"}},
+        {"selector": ".section", "style": {"background-color": "#111827"}},
+        {"selector": ".item", "style": {"background-color": "#334155"}},
         {"selector": ":selected", "style": {"border-width": 3, "border-color": "#FBBF24"}},
     ]
 
@@ -160,10 +143,6 @@ DEFAULT_VIEW = {
     "font_size": 10,
     "text_max_width": 520,
     "show_edge_labels": False,
-    "scale_node_size": True,
-    "scale_edge_width": True,
-    "min_node_weight": 1,
-    "min_edge_weight": 1,
 }
 
 app = Dash(
@@ -181,8 +160,6 @@ app.layout = html.Div(
     children=[
         dcc.Store(id="store_graph"),
         dcc.Store(id="store_node_index"),
-        dcc.Download(id="download_csv"),
-        dcc.Download(id="download_xlsx"),
 
         html.Div(
             className="row",
@@ -210,8 +187,6 @@ app.layout = html.Div(
                                 DEFAULT_VIEW["font_size"],
                                 DEFAULT_VIEW["text_max_width"],
                                 DEFAULT_VIEW["show_edge_labels"],
-                                DEFAULT_VIEW["scale_node_size"],
-                                DEFAULT_VIEW["scale_edge_width"],
                             ),
                             elements=[],
                         )
@@ -330,65 +305,6 @@ app.layout = html.Div(
                                                         ),
                                                     ],
                                                 ),
-                                                html.Div(
-                                                    className="control-section",
-                                                    children=[
-                                                        html.Div("Weights", className="control-label"),
-                                                        dcc.Checklist(
-                                                            id="weight_toggles",
-                                                            options=[
-                                                                {"label": " Scale node size by weight", "value": "node"},
-                                                                {"label": " Scale edge width by weight", "value": "edge"},
-                                                                {"label": " Keep context when filtering", "value": "context"},
-                                                            ],
-                                                            value=["node", "edge"],
-                                                            inputClassName="control-checkbox",
-                                                            labelClassName="control-checkbox__label",
-                                                        ),
-                                                    ],
-                                                ),
-                                                html.Div(
-                                                    className="control-section",
-                                                    children=[
-                                                        html.Div("Min node weight", className="control-label"),
-                                                        dcc.Slider(
-                                                            id="min_node_weight",
-                                                            min=1,
-                                                            max=15,
-                                                            step=0.5,
-                                                            value=DEFAULT_VIEW["min_node_weight"],
-                                                        ),
-                                                    ],
-                                                ),
-                                                html.Div(
-                                                    className="control-section",
-                                                    children=[
-                                                        html.Div("Min edge weight", className="control-label"),
-                                                        dcc.Slider(
-                                                            id="min_edge_weight",
-                                                            min=1,
-                                                            max=10,
-                                                            step=1,
-                                                            value=DEFAULT_VIEW["min_edge_weight"],
-                                                        ),
-                                                    ],
-                                                ),
-                                                html.Div(
-                                                    className="control-section",
-                                                    children=[
-                                                        html.Div("Exports", className="control-label"),
-                                                        html.Button("Download CSV", id="export_csv", className="control-button"),
-                                                        html.Button("Download XLSX", id="export_xlsx", className="control-button"),
-                                                    ],
-                                                ),
-                                                html.Div(
-                                                    className="control-section",
-                                                    children=[
-                                                        html.Div("Hover details", className="control-label"),
-                                                        html.Pre(id="hover-node-output", style={"whiteSpace": "pre-wrap"}),
-                                                        html.Pre(id="hover-edge-output", style={"whiteSpace": "pre-wrap"}),
-                                                    ],
-                                                ),
                                             ],
                                         )
                                     ],
@@ -442,7 +358,7 @@ def load_graph(path):
     node_index = {n["data"]["id"]: n for n in g.nodes if n.get("data", {}).get("id")}
 
     # Genesis node: document
-    doc_node = next((n for n in g.nodes if n["data"].get("type") == "Document"), None)
+    doc_node = next((n for n in g.nodes if n["data"].get("type") == "document"), None)
     elements = [doc_node] if doc_node else []
 
     store_graph = {"nodes": g.nodes, "edges": g.edges}
@@ -515,12 +431,11 @@ def expand_on_click(node_data, elements, store_graph, node_index, mode, page_ran
     new_nodes = []
     new_edges = []
 
-    child_edges = {"HAS_PAGE", "HAS_BODY", "CONTAINS", "ON_PAGE"}
     for ed in store_graph["edges"]:
         d = ed["data"]
         src, tgt, rel = d.get("source"), d.get("target"), d.get("rel")
 
-        if mode == "children" and not (rel in child_edges and src == node_id):
+        if mode == "children" and not (rel == "hier" and src == node_id):
             continue
         if mode == "out" and src != node_id:
             continue
@@ -561,19 +476,12 @@ def update_layout(name, scaling):
 @app.callback(
     Output("graph", "elements", allow_duplicate=True),
     Input("page_range", "value"),
-    Input("min_node_weight", "value"),
-    Input("min_edge_weight", "value"),
-    Input("weight_toggles", "value"),
     State("graph", "elements"),
     prevent_initial_call=True,
 )
-def filter_elements_by_page(page_range, min_node_weight, min_edge_weight, weight_toggles, elements):
+def filter_elements_by_page(page_range, elements):
     if not page_range or not elements:
         return no_update
-
-    keep_context = "context" in (weight_toggles or [])
-    node_threshold = float(min_node_weight or 1)
-    edge_threshold = float(min_edge_weight or 1)
 
     start_page, end_page = page_range
     allowed_nodes = set()
@@ -585,40 +493,17 @@ def filter_elements_by_page(page_range, min_node_weight, min_edge_weight, weight
             continue
 
         page = data.get("page")
-        weight = float(data.get("weight") or 0)
         if page is None or (start_page <= page <= end_page):
-            if weight >= node_threshold:
-                allowed_nodes.add(data.get("id"))
-                filtered_nodes.append(el)
+            allowed_nodes.add(data.get("id"))
+            filtered_nodes.append(el)
 
-    filtered_edges = []
-    context_nodes = set()
-    for el in elements:
-        data = el.get("data", {})
-        if "source" not in data:
-            continue
-        weight = float(data.get("weight") or 0)
-        if weight < edge_threshold:
-            continue
-        src = data.get("source")
-        tgt = data.get("target")
-        if src in allowed_nodes and tgt in allowed_nodes:
-            filtered_edges.append(el)
-        elif keep_context and (src in allowed_nodes or tgt in allowed_nodes):
-            context_nodes.update([src, tgt])
-            filtered_edges.append(el)
-
-    if keep_context and context_nodes:
-        for el in elements:
-            data = el.get("data", {})
-            if "source" in data:
-                continue
-            node_id = data.get("id")
-            page = data.get("page")
-            if node_id in context_nodes and (page is None or (start_page <= page <= end_page)):
-                if node_id not in allowed_nodes:
-                    allowed_nodes.add(node_id)
-                    filtered_nodes.append(el)
+    filtered_edges = [
+        el
+        for el in elements
+        if "source" in el.get("data", {})
+        and el["data"].get("source") in allowed_nodes
+        and el["data"].get("target") in allowed_nodes
+    ]
 
     return filtered_nodes + filtered_edges
 
@@ -626,17 +511,13 @@ def filter_elements_by_page(page_range, min_node_weight, min_edge_weight, weight
 @app.callback(
     Output("graph", "stylesheet"),
     Input("edge_labels", "value"),
-    Input("weight_toggles", "value"),
 )
-def update_styles(edge_labels, weight_toggles):
-    weight_toggles = weight_toggles or []
+def update_styles(edge_labels):
     return base_stylesheet(
         DEFAULT_VIEW["node_size"],
         DEFAULT_VIEW["font_size"],
         DEFAULT_VIEW["text_max_width"],
         "on" in (edge_labels or []),
-        "node" in weight_toggles,
-        "edge" in weight_toggles,
     )
 
 
@@ -654,179 +535,6 @@ def show_node(data):
 )
 def show_edge(data):
     return json.dumps(data, indent=2)
-
-
-def _column_letter(index: int) -> str:
-    letter = ""
-    while index:
-        index, remainder = divmod(index - 1, 26)
-        letter = chr(65 + remainder) + letter
-    return letter
-
-
-def _sheet_xml(rows):
-    lines = ['<?xml version="1.0" encoding="UTF-8"?>']
-    lines.append('<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">')
-    lines.append("<sheetData>")
-    for r_index, row in enumerate(rows, start=1):
-        lines.append(f'<row r="{r_index}">')
-        for c_index, value in enumerate(row, start=1):
-            cell_ref = f"{_column_letter(c_index)}{r_index}"
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
-                lines.append(f'<c r="{cell_ref}"><v>{value}</v></c>')
-            else:
-                safe = escape(str(value))
-                lines.append(f'<c r="{cell_ref}" t="inlineStr"><is><t>{safe}</t></is></c>')
-        lines.append("</row>")
-    lines.append("</sheetData>")
-    lines.append("</worksheet>")
-    return "\n".join(lines)
-
-
-def _build_xlsx(nodes_rows, edges_rows):
-    workbook = """<?xml version="1.0" encoding="UTF-8"?>
-<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <sheets>
-    <sheet name="Nodes" sheetId="1" r:id="rId1"/>
-    <sheet name="Edges" sheetId="2" r:id="rId2"/>
-  </sheets>
-</workbook>
-"""
-    rels = """<?xml version="1.0" encoding="UTF-8"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
-</Relationships>
-"""
-    root_rels = """<?xml version="1.0" encoding="UTF-8"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
-</Relationships>
-"""
-    content_types = """<?xml version="1.0" encoding="UTF-8"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
-  <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
-</Types>
-"""
-    output = io.BytesIO()
-    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("[Content_Types].xml", content_types)
-        zf.writestr("_rels/.rels", root_rels)
-        zf.writestr("xl/workbook.xml", workbook)
-        zf.writestr("xl/_rels/workbook.xml.rels", rels)
-        zf.writestr("xl/worksheets/sheet1.xml", _sheet_xml(nodes_rows))
-        zf.writestr("xl/worksheets/sheet2.xml", _sheet_xml(edges_rows))
-    return output.getvalue()
-
-
-def _build_export_rows(store_graph):
-    node_index = {n["data"]["id"]: n for n in store_graph.get("nodes", [])}
-    nodes_rows = [["Type", "Name", "Image", "Weight"]]
-    for node in store_graph.get("nodes", []):
-        data = node["data"]
-        nodes_rows.append(
-            [
-                data.get("type", ""),
-                data.get("name", ""),
-                data.get("image", ""),
-                round(float(data.get("weight") or 1), 3),
-            ]
-        )
-
-    edges_rows = [["From Type", "From Name", "To Type", "To Name", "Weight"]]
-    for edge in store_graph.get("edges", []):
-        data = edge["data"]
-        source = node_index.get(data.get("source"), {}).get("data", {})
-        target = node_index.get(data.get("target"), {}).get("data", {})
-        edges_rows.append(
-            [
-                source.get("type", ""),
-                source.get("name", ""),
-                target.get("type", ""),
-                target.get("name", ""),
-                round(float(data.get("weight") or 1), 3),
-            ]
-        )
-    return nodes_rows, edges_rows
-
-
-@app.callback(
-    Output("download_csv", "data"),
-    Input("export_csv", "n_clicks"),
-    State("store_graph", "data"),
-    prevent_initial_call=True,
-)
-def export_csv(n_clicks, store_graph):
-    if not n_clicks or not store_graph:
-        return no_update
-
-    nodes_rows, edges_rows = _build_export_rows(store_graph)
-    output = io.BytesIO()
-    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        nodes_buffer = io.StringIO()
-        edges_buffer = io.StringIO()
-        csv.writer(nodes_buffer).writerows(nodes_rows)
-        csv.writer(edges_buffer).writerows(edges_rows)
-        zf.writestr("nodes.csv", nodes_buffer.getvalue())
-        zf.writestr("edges.csv", edges_buffer.getvalue())
-    return dcc.send_bytes(output.getvalue(), "graph_commons_csv.zip")
-
-
-@app.callback(
-    Output("download_xlsx", "data"),
-    Input("export_xlsx", "n_clicks"),
-    State("store_graph", "data"),
-    prevent_initial_call=True,
-)
-def export_xlsx(n_clicks, store_graph):
-    if not n_clicks or not store_graph:
-        return no_update
-
-    nodes_rows, edges_rows = _build_export_rows(store_graph)
-    return dcc.send_bytes(_build_xlsx(nodes_rows, edges_rows), "graph_commons.xlsx")
-
-
-@app.callback(
-    Output("hover-node-output", "children"),
-    Input("graph", "mouseoverNodeData"),
-)
-def show_hover_node(data):
-    if not data:
-        return "Hover a node to see details."
-
-    return "\n".join(
-        [
-            f"Type: {data.get('type')}",
-            f"Name: {data.get('name')}",
-            f"Weight: {round(float(data.get('weight') or 0), 3)}",
-            f"Degree: {data.get('degree')}",
-            f"Text length: {data.get('text_length')}",
-            f"Children count: {data.get('children_count')}",
-        ]
-    )
-
-
-@app.callback(
-    Output("hover-edge-output", "children"),
-    Input("graph", "mouseoverEdgeData"),
-)
-def show_hover_edge(data):
-    if not data:
-        return "Hover an edge to see details."
-
-    return "\n".join(
-        [
-            f"Edge Type: {data.get('rel')}",
-            f"Weight: {round(float(data.get('weight') or 0), 3)}",
-            f"Source: {data.get('source_type')} · {data.get('source_name')}",
-            f"Target: {data.get('target_type')} · {data.get('target_name')}",
-        ]
-    )
 
 
 # -------------------------------------------------
