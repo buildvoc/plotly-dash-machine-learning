@@ -252,14 +252,22 @@ def _compute_edge_weights(edges: List[Dict[str, Any]], node_lookup: Dict[str, Di
         data["width"] = round(_clamp(1 + weight * 0.7, 1, 8), 2)
 
 
-def build_graph_from_docling_json(path: str) -> GraphPayload:
-    doc = _load_json(path)
-    resolved_doc = resolve_refs(doc, doc)
+def _normalize_doc_root(doc: Dict[str, Any]) -> Dict[str, Any]:
+    if isinstance(doc, dict):
+        for key in ("document", "doc"):
+            candidate = doc.get(key)
+            if isinstance(candidate, dict):
+                return candidate
+    return doc
+
+
+def _build_graph(doc: Dict[str, Any], doc_name: str) -> GraphPayload:
+    resolved_doc = resolve_refs(_normalize_doc_root(doc), doc)
 
     nodes_by_id: Dict[str, Dict[str, Any]] = {}
     edges_by_id: Dict[str, Dict[str, Any]] = {}
 
-    doc_name = os.path.basename(path)
+    doc_name = doc_name or resolved_doc.get("title") or "Docling Document"
     doc_node_id = _node_id(NODE_DOCUMENT, doc_name)
     nodes_by_id[doc_node_id] = {
         "data": {
@@ -391,6 +399,17 @@ def build_graph_from_docling_json(path: str) -> GraphPayload:
     edges = sorted(edges, key=lambda e: e.get("data", {}).get("id", ""))
 
     return GraphPayload(nodes=nodes, edges=edges)
+
+
+def build_graph_from_docling_json(path: str) -> GraphPayload:
+    doc = _load_json(path)
+    doc_name = os.path.basename(path)
+    return _build_graph(doc, doc_name)
+
+
+def build_elements_from_docling_json(doc: Dict[str, Any], doc_name: str | None = None) -> List[Dict[str, Any]]:
+    graph = _build_graph(doc, doc_name or doc.get("title") or "Docling Document")
+    return graph.nodes + graph.edges
 
 
 # -----------------------------
