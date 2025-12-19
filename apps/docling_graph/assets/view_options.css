@@ -200,6 +200,20 @@
   margin-bottom: 10px;
 }
 
+.control-button {
+  background: #111827;
+  color: #e5e7eb;
+  border: 1px solid #1f2937;
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  margin-right: 8px;
+}
+
+.control-button:hover {
+  border-color: #334155;
+}
+
 .control-title {
   font-size: 15px;
   font-weight: 700;
